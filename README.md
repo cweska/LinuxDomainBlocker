@@ -96,6 +96,19 @@ Quick status check (recommended):
 sudo ./check-status.sh
 ```
 
+### Debug Blocking Issues
+
+If domains aren't being blocked, run the debug script:
+```bash
+sudo /opt/domain-blocker/debug.sh
+```
+
+This will check:
+- dnsmasq service status
+- Block list file existence and content
+- DNS configuration
+- Test blocking functionality
+
 Or check individual components:
 ```bash
 systemctl status dnsmasq
@@ -141,6 +154,60 @@ sudo ./harden.sh
 ```
 
 ## Troubleshooting
+
+### Domains Not Being Blocked
+
+**Important Note:** Not all domains are in the block lists. The blocklistproject lists focus on:
+- Malicious sites (malware, phishing, ransomware)
+- Unwanted content (ads, tracking, porn, piracy)
+- Scam sites
+
+Legitimate sites like facebook.com, twitter.com, etc. are typically NOT in these lists.
+
+**To debug blocking issues:**
+
+1. **Run the debug script:**
+   ```bash
+   sudo /opt/domain-blocker/debug.sh
+   ```
+   This will check all components and identify the issue.
+
+2. **Verify blocking is working:**
+   ```bash
+   # Check if block list exists and has entries
+   wc -l /opt/domain-blocker/config/blocked-domains.conf
+   
+   # Test with a domain that should be blocked
+   # First, find a domain in the list:
+   head -5 /opt/domain-blocker/config/blocked-domains.conf
+   
+   # Then test it (replace with actual domain from list):
+   dig @127.0.0.1 example-blocked-domain.com
+   # Should return: 0.0.0.0
+   ```
+
+3. **Check if dnsmasq is reading the block list:**
+   ```bash
+   # Verify dnsmasq config includes the block list
+   grep "conf-file" /etc/dnsmasq.conf
+   
+   # Check dnsmasq is running
+   systemctl status dnsmasq
+   
+   # Reload dnsmasq to pick up changes
+   sudo systemctl reload dnsmasq
+   ```
+
+4. **Verify system is using dnsmasq:**
+   ```bash
+   # Check /etc/resolv.conf
+   cat /etc/resolv.conf
+   # Should show: nameserver 127.0.0.1
+   
+   # Test direct query to dnsmasq
+   dig @127.0.0.1 google.com
+   # Should return an IP address (not 0.0.0.0 for non-blocked sites)
+   ```
 
 ### DNS Not Working
 
