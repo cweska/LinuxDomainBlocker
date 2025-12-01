@@ -1,0 +1,12 @@
+[Unit]
+Description=Domain Blocker Update Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/domain-blocker/update-blocker.sh
+User=root
+StandardOutput=journal
+StandardError=journal
+

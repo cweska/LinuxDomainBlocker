@@ -1,0 +1,152 @@
+#!/bin/bash
+#
+# install.sh
+# Installation script for Linux Domain Blocker
+#
+
+set -euo pipefail
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "Error: This script must be run as root (use sudo)"
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="/opt/domain-blocker"
+
+echo "=========================================="
+echo "Linux Domain Blocker Installation"
+echo "=========================================="
+echo ""
+
+# Check if Ubuntu 24.04
+if [ ! -f /etc/os-release ]; then
+    echo "Error: Cannot determine OS version"
+    exit 1
+fi
+
+. /etc/os-release
+if [ "$ID" != "ubuntu" ] || [ "$VERSION_ID" != "24.04" ]; then
+    echo "Warning: This script is designed for Ubuntu 24.04"
+    echo "Detected: $PRETTY_NAME"
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# Stop existing dnsmasq if running
+if systemctl is-active --quiet dnsmasq 2>/dev/null; then
+    echo "Step 0: Stopping existing dnsmasq service..."
+    systemctl stop dnsmasq
+fi
+
+# Install required packages
+echo "Step 1: Installing required packages..."
+apt-get update
+apt-get install -y dnsmasq curl systemd
+
+# Create installation directory
+echo "Step 2: Creating installation directory..."
+mkdir -p "${INSTALL_DIR}"
+mkdir -p "${INSTALL_DIR}/config"
+mkdir -p "${INSTALL_DIR}/systemd"
+mkdir -p "${INSTALL_DIR}/lists"
+mkdir -p /var/log
+
+# Copy files
+echo "Step 3: Copying files..."
+cp "${SCRIPT_DIR}/download-lists.sh" "${INSTALL_DIR}/"
+cp "${SCRIPT_DIR}/merge-lists.sh" "${INSTALL_DIR}/"
+cp "${SCRIPT_DIR}/update-blocker.sh" "${INSTALL_DIR}/"
+cp "${SCRIPT_DIR}/whitelist.txt" "${INSTALL_DIR}/"
+cp "${SCRIPT_DIR}/config/dnsmasq.conf" "${INSTALL_DIR}/config/"
+cp "${SCRIPT_DIR}/systemd/domain-blocker.service" "${INSTALL_DIR}/systemd/"
+cp "${SCRIPT_DIR}/systemd/domain-blocker.timer" "${INSTALL_DIR}/systemd/"
+
+# Make scripts executable
+chmod +x "${INSTALL_DIR}/download-lists.sh"
+chmod +x "${INSTALL_DIR}/merge-lists.sh"
+chmod +x "${INSTALL_DIR}/update-blocker.sh"
+
+# Set ownership
+chown -R root:root "${INSTALL_DIR}"
+
+# Backup existing dnsmasq config if it exists
+if [ -f /etc/dnsmasq.conf ]; then
+    echo "Step 4: Backing up existing dnsmasq configuration..."
+    cp /etc/dnsmasq.conf /etc/dnsmasq.conf.backup.$(date +%Y%m%d_%H%M%S)
+fi
+
+# Install dnsmasq configuration
+echo "Step 5: Installing dnsmasq configuration..."
+cp "${INSTALL_DIR}/config/dnsmasq.conf" /etc/dnsmasq.conf
+
+# Install systemd service and timer
+echo "Step 6: Installing systemd service and timer..."
+cp "${INSTALL_DIR}/systemd/domain-blocker.service" /etc/systemd/system/
+cp "${INSTALL_DIR}/systemd/domain-blocker.timer" /etc/systemd/system/
+systemctl daemon-reload
+
+# Download initial block lists
+echo "Step 7: Downloading initial block lists (this may take a few minutes)..."
+"${INSTALL_DIR}/update-blocker.sh"
+
+# Configure systemd-resolved to use dnsmasq
+echo "Step 8: Configuring systemd-resolved..."
+if [ -f /etc/systemd/resolved.conf ]; then
+    # Backup
+    cp /etc/systemd/resolved.conf /etc/systemd/resolved.conf.backup.$(date +%Y%m%d_%H%M%S)
+    
+    # Configure to use dnsmasq
+    sed -i 's/#DNS=/DNS=127.0.0.1/' /etc/systemd/resolved.conf
+    sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf
+    
+    # Add DNS if not present
+    if ! grep -q "^DNS=" /etc/systemd/resolved.conf; then
+        echo "DNS=127.0.0.1" >> /etc/systemd/resolved.conf
+    fi
+    
+    # Disable stub listener if not already
+    if ! grep -q "^DNSStubListener=" /etc/systemd/resolved.conf; then
+        echo "DNSStubListener=no" >> /etc/systemd/resolved.conf
+    fi
+fi
+
+# Enable and start dnsmasq
+echo "Step 9: Starting dnsmasq service..."
+systemctl enable dnsmasq
+systemctl restart dnsmasq
+
+# Restart systemd-resolved
+systemctl restart systemd-resolved
+
+# Enable and start update timer
+echo "Step 10: Enabling automatic updates..."
+systemctl enable domain-blocker.timer
+systemctl start domain-blocker.timer
+
+# Run hardening script if it exists
+if [ -f "${SCRIPT_DIR}/harden.sh" ]; then
+    echo "Step 11: Running security hardening..."
+    "${SCRIPT_DIR}/harden.sh"
+fi
+
+echo ""
+echo "=========================================="
+echo "Installation complete!"
+echo "=========================================="
+echo ""
+echo "Domain blocker is now active."
+echo ""
+echo "Useful commands:"
+echo "  - Check status: systemctl status dnsmasq"
+echo "  - Manual update: sudo /opt/domain-blocker/update-blocker.sh"
+echo "  - View logs: journalctl -u domain-blocker.service"
+echo "  - Edit whitelist: sudo nano /opt/domain-blocker/whitelist.txt"
+echo ""
+echo "To test blocking, try: curl -v http://example-blocked-site.com"
+echo ""
+

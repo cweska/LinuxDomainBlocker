@@ -1,0 +1,13 @@
+[Unit]
+Description=Domain Blocker Daily Update Timer
+Requires=domain-blocker.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=24h
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

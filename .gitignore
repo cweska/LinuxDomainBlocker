@@ -1,0 +1,16 @@
+# Lists directory (downloaded block lists)
+lists/
+*.txt
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# OS files
+.DS_Store
+Thumbs.db
+
