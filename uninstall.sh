@@ -74,10 +74,12 @@ if [ -f /etc/systemd/resolved.conf.backup.* ]; then
         echo "  ✓ Restored systemd-resolved.conf from backup"
     fi
 else
-    # Remove DNS=127.0.0.1
+    # Remove DNS=127.0.0.1 (use temp file to avoid permission issues)
     if [ -f /etc/systemd/resolved.conf ]; then
-        sed -i '/^DNS=127.0.0.1/d' /etc/systemd/resolved.conf
-        sed -i '/^# DNSStubListener kept enabled/d' /etc/systemd/resolved.conf
+        TMP_RESOLVED=$(mktemp)
+        sed '/^DNS=127.0.0.1/d' /etc/systemd/resolved.conf | \
+            sed '/^# DNSStubListener kept enabled/d' > "${TMP_RESOLVED}"
+        mv "${TMP_RESOLVED}" /etc/systemd/resolved.conf
     fi
     echo "  ✓ Restored systemd-resolved.conf defaults"
 fi

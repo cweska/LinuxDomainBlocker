@@ -103,19 +103,27 @@ if [ -f /etc/systemd/resolved.conf ]; then
     # Configure to use dnsmasq
     # Keep DNSStubListener enabled to avoid D-Bus issues with NetworkManager
     # Point DNS to localhost where dnsmasq is listening
-    sed -i 's/#DNS=/DNS=127.0.0.1/' /etc/systemd/resolved.conf
+    # Use a temp file approach to avoid permission issues with sed -i
+    TMP_RESOLVED=$(mktemp)
+    
+    # Process the file
+    sed 's/#DNS=/DNS=127.0.0.1/' /etc/systemd/resolved.conf > "${TMP_RESOLVED}"
     
     # Add DNS if not present
-    if ! grep -q "^DNS=" /etc/systemd/resolved.conf; then
-        echo "DNS=127.0.0.1" >> /etc/systemd/resolved.conf
+    if ! grep -q "^DNS=" "${TMP_RESOLVED}"; then
+        echo "DNS=127.0.0.1" >> "${TMP_RESOLVED}"
     fi
     
     # Keep DNSStubListener enabled (don't disable it) to work with NetworkManager
     # This avoids the dbus-org.freedesktop.network1.service error
-    if ! grep -q "^DNSStubListener=" /etc/systemd/resolved.conf; then
+    if ! grep -q "^DNSStubListener=" "${TMP_RESOLVED}"; then
         # Only add if not present - don't force it to 'no'
-        echo "# DNSStubListener kept enabled for NetworkManager compatibility" >> /etc/systemd/resolved.conf
+        echo "# DNSStubListener kept enabled for NetworkManager compatibility" >> "${TMP_RESOLVED}"
     fi
+    
+    # Replace the original file
+    mv "${TMP_RESOLVED}" /etc/systemd/resolved.conf
+    echo "  ✓ Configured systemd-resolved to use dnsmasq"
 fi
 
 # Also configure /etc/resolv.conf to point to dnsmasq
