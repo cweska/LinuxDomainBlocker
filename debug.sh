@@ -36,15 +36,21 @@ if [ -f "${BLOCKED_FILE}" ]; then
     BLOCKED_COUNT=$(wc -l < "${BLOCKED_FILE}")
     echo "  ✓ Block list file exists: ${BLOCKED_COUNT} entries"
     
-    # Check if facebook.com is in the list
-    if grep -q "facebook.com" "${BLOCKED_FILE}"; then
-        echo "  ✓ facebook.com is in the block list"
-        grep "facebook.com" "${BLOCKED_FILE}" | head -3
+    # Check if facebook.com (exact) is in the list
+    if grep -q "^address=/facebook.com/0.0.0.0$" "${BLOCKED_FILE}"; then
+        echo "  ✓ facebook.com (exact) IS in the block list"
+    elif grep -q "^address=/facebook.com/" "${BLOCKED_FILE}"; then
+        echo "  ✓ facebook.com (exact) IS in the block list"
+        grep "^address=/facebook.com/" "${BLOCKED_FILE}"
     else
-        echo "  ⚠ facebook.com is NOT in the block list"
-        echo "    This may be normal - facebook.com might not be in blocklistproject lists"
-        echo "    Checking for similar domains..."
-        grep -i "facebook" "${BLOCKED_FILE}" | head -5 || echo "    No facebook-related domains found"
+        echo "  ⚠ facebook.com (exact) is NOT in the block list"
+        echo "    Checking for facebook-related domains..."
+        FACEBOOK_COUNT=$(grep -i "facebook" "${BLOCKED_FILE}" | wc -l)
+        echo "    Found ${FACEBOOK_COUNT} facebook-related domains (variations, not exact)"
+        grep -i "^address=/.*facebook" "${BLOCKED_FILE}" | head -5
+        echo ""
+        echo "    Note: Only exact domain matches are blocked."
+        echo "    Variations like '904facebook.com' won't block 'facebook.com'"
     fi
 else
     echo "  ✗ Block list file does not exist!"
@@ -56,9 +62,12 @@ echo "3. Checking dnsmasq configuration..."
 if [ -f /etc/dnsmasq.conf ]; then
     if grep -q "${INSTALL_DIR}/config/blocked-domains.conf" /etc/dnsmasq.conf; then
         echo "  ✓ dnsmasq.conf includes blocked-domains.conf"
+        grep "conf-file.*blocked-domains" /etc/dnsmasq.conf
     else
         echo "  ✗ dnsmasq.conf does NOT include blocked-domains.conf"
         echo "    Expected line: conf-file=${INSTALL_DIR}/config/blocked-domains.conf"
+        echo "    This is the problem! dnsmasq is not reading the block list."
+        echo "    Fix: Add 'conf-file=${INSTALL_DIR}/config/blocked-domains.conf' to /etc/dnsmasq.conf"
     fi
     
     # Check if dnsmasq is listening on 127.0.0.1
@@ -67,6 +76,16 @@ if [ -f /etc/dnsmasq.conf ]; then
     else
         echo "  ✗ dnsmasq is NOT configured to listen on 127.0.0.1"
     fi
+    
+    # Check if dnsmasq has actually loaded the config
+    echo ""
+    echo "  Checking if dnsmasq loaded the block list:"
+    if dnsmasq --test 2>&1 | grep -q "dnsmasq: syntax check OK"; then
+        echo "  ✓ dnsmasq config syntax is valid"
+    else
+        echo "  ⚠ dnsmasq config may have syntax errors"
+        dnsmasq --test 2>&1 | head -5
+    fi
 else
     echo "  ✗ /etc/dnsmasq.conf does not exist"
 fi
@@ -74,15 +93,40 @@ echo ""
 
 echo "4. Testing DNS resolution..."
 echo "  Testing direct query to dnsmasq (127.0.0.1):"
-if dig @127.0.0.1 facebook.com +short +timeout=2 2>&1 | head -1; then
-    RESULT=$(dig @127.0.0.1 facebook.com +short +timeout=2 2>&1 | head -1)
-    if [ "$RESULT" = "0.0.0.0" ]; then
+FACEBOOK_RESULT=$(dig @127.0.0.1 facebook.com +short +timeout=2 2>&1 | head -1)
+if [ -n "$FACEBOOK_RESULT" ] && [ "$FACEBOOK_RESULT" != "connection timed out" ]; then
+    echo "  facebook.com resolves to: $FACEBOOK_RESULT"
+    if [ "$FACEBOOK_RESULT" = "0.0.0.0" ]; then
         echo "  ✓ facebook.com is correctly blocked (returns 0.0.0.0)"
     else
-        echo "  ✗ facebook.com is NOT blocked (returns: $RESULT)"
+        echo "  ✗ facebook.com is NOT blocked (returns: $FACEBOOK_RESULT)"
+        echo "    This means either:"
+        echo "    1. facebook.com is not in the block list (exact match)"
+        echo "    2. dnsmasq is not reading the block list file"
+        echo "    3. dnsmasq needs to be reloaded"
     fi
 else
     echo "  ✗ Cannot query dnsmasq - service may not be running or not responding"
+fi
+
+# Test with a domain that should definitely be blocked
+echo ""
+echo "  Testing with a domain from the block list:"
+if [ -f "${BLOCKED_FILE}" ] && [ -s "${BLOCKED_FILE}" ]; then
+    # Get first actual domain (not a variation)
+    TEST_DOMAIN=$(grep "^address=/[^/]*\.[^/]*/0.0.0.0$" "${BLOCKED_FILE}" | head -1 | sed 's|address=/||' | sed 's|/0.0.0.0||')
+    if [ -n "$TEST_DOMAIN" ]; then
+        echo "  Testing ${TEST_DOMAIN} (from block list):"
+        TEST_RESULT=$(dig @127.0.0.1 "${TEST_DOMAIN}" +short +timeout=2 2>&1 | head -1)
+        if [ "$TEST_RESULT" = "0.0.0.0" ]; then
+            echo "  ✓ ${TEST_DOMAIN} is correctly blocked"
+            echo "    This confirms dnsmasq IS reading the block list correctly"
+        else
+            echo "  ✗ ${TEST_DOMAIN} is NOT blocked (returns: $TEST_RESULT)"
+            echo "    This indicates dnsmasq is NOT using the block list!"
+            echo "    Check: grep 'conf-file' /etc/dnsmasq.conf"
+        fi
+    fi
 fi
 echo ""
 
@@ -198,23 +242,31 @@ echo "=========================================="
 echo ""
 echo "Common issues and fixes:"
 echo ""
-echo "1. If dnsmasq is not running:"
+echo "1. If dnsmasq is not reading the block list:"
+echo "   Check: grep 'conf-file' /etc/dnsmasq.conf"
+echo "   Should show: conf-file=${INSTALL_DIR}/config/blocked-domains.conf"
+echo "   If missing, add it and: sudo systemctl reload dnsmasq"
+echo ""
+echo "2. If dnsmasq is not running:"
 echo "   sudo systemctl start dnsmasq"
 echo ""
-echo "2. If block list is missing or empty:"
+echo "3. If block list is missing or empty:"
 echo "   sudo ${INSTALL_DIR}/update-blocker.sh"
 echo ""
-echo "3. If systemd-resolved is not using dnsmasq:"
+echo "4. If systemd-resolved is not using dnsmasq:"
 echo "   Check /etc/systemd/resolved.conf has DNS=127.0.0.1"
 echo "   Then: sudo systemctl restart systemd-resolved"
 echo ""
-echo "4. If /etc/resolv.conf doesn't point to 127.0.0.1:"
+echo "5. If /etc/resolv.conf doesn't point to 127.0.0.1:"
 echo "   The install script should have configured this"
 echo "   Check: cat /etc/resolv.conf"
 echo ""
-echo "5. To test if dnsmasq is working:"
-echo "   dig @127.0.0.1 google.com"
-echo "   dig @127.0.0.1 facebook.com"
-echo "   (Should return IP addresses, not 0.0.0.0 for non-blocked domains)"
+echo "6. If a specific domain isn't blocked:"
+echo "   Check if it's in the list: grep '^address=/domain.com/' ${BLOCKED_FILE}"
+echo "   Note: Only EXACT domain matches are blocked"
+echo "   Variations (e.g., '904facebook.com') won't block 'facebook.com'"
+echo ""
+echo "7. To reload dnsmasq after changes:"
+echo "   sudo systemctl reload dnsmasq"
 echo ""
 
