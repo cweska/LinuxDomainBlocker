@@ -82,6 +82,14 @@ fi
 
 # Install dnsmasq configuration
 echo "Step 5: Installing dnsmasq configuration..."
+
+# Ensure blocked-domains.conf exists before copying dnsmasq.conf
+# (dnsmasq will fail if conf-file points to non-existent file)
+mkdir -p "${INSTALL_DIR}/config"
+if [ ! -f "${INSTALL_DIR}/config/blocked-domains.conf" ]; then
+    echo "# Blocked domains will be populated by update-blocker.sh" > "${INSTALL_DIR}/config/blocked-domains.conf"
+fi
+
 cp "${INSTALL_DIR}/config/dnsmasq.conf" /etc/dnsmasq.conf
 
 # Install systemd service and timer
@@ -92,7 +100,22 @@ systemctl daemon-reload
 
 # Download initial block lists
 echo "Step 7: Downloading initial block lists (this may take a few minutes)..."
-"${INSTALL_DIR}/update-blocker.sh"
+if ! "${INSTALL_DIR}/update-blocker.sh"; then
+    echo "  ⚠ Warning: Block list download/merge had issues"
+    echo "  Creating minimal blocked-domains.conf file..."
+    # Create a minimal file so dnsmasq can start
+    mkdir -p "${INSTALL_DIR}/config"
+    touch "${INSTALL_DIR}/config/blocked-domains.conf"
+    echo "# Blocked domains will be populated by update-blocker.sh" > "${INSTALL_DIR}/config/blocked-domains.conf"
+fi
+
+# Verify blocked-domains.conf exists
+if [ ! -f "${INSTALL_DIR}/config/blocked-domains.conf" ]; then
+    echo "  Creating empty blocked-domains.conf file..."
+    mkdir -p "${INSTALL_DIR}/config"
+    touch "${INSTALL_DIR}/config/blocked-domains.conf"
+    echo "# Blocked domains will be populated by update-blocker.sh" > "${INSTALL_DIR}/config/blocked-domains.conf"
+fi
 
 # Configure systemd-resolved to use dnsmasq
 echo "Step 8: Configuring systemd-resolved..."
@@ -146,8 +169,80 @@ fi
 
 # Enable and start dnsmasq
 echo "Step 9: Starting dnsmasq service..."
+
+# Test dnsmasq configuration before starting
+echo "  Testing dnsmasq configuration..."
+if dnsmasq --test 2>&1 | grep -q "dnsmasq: syntax check OK"; then
+    echo "  ✓ Configuration syntax is valid"
+else
+    echo "  ⚠ Configuration syntax check failed:"
+    dnsmasq --test 2>&1 | head -10
+    echo ""
+    echo "  Attempting to continue anyway..."
+fi
+
+# Check if port 53 is already in use
+PORT_53_IN_USE=false
+if command -v ss >/dev/null 2>&1; then
+    if ss -tuln 2>/dev/null | grep -qE "127\.0\.0\.1:53|0\.0\.0\.0:53|::1:53"; then
+        PORT_53_IN_USE=true
+    fi
+elif command -v netstat >/dev/null 2>&1; then
+    if netstat -tuln 2>/dev/null | grep -qE "127\.0\.0\.1:53|0\.0\.0\.0:53|::1:53"; then
+        PORT_53_IN_USE=true
+    fi
+fi
+
+if [ "$PORT_53_IN_USE" = true ]; then
+    echo "  ⚠ Warning: Port 53 on 127.0.0.1 appears to be in use"
+    echo "  This may prevent dnsmasq from starting"
+    echo "  Checking what's using the port..."
+    if command -v ss >/dev/null 2>&1; then
+        ss -tulpn 2>/dev/null | grep -E "127\.0\.0\.1:53|0\.0\.0\.0:53" || true
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tulpn 2>/dev/null | grep -E "127\.0\.0\.1:53|0\.0\.0\.0:53" || true
+    fi
+    echo "  Note: systemd-resolved typically uses 127.0.0.53:53, not 127.0.0.1:53"
+    echo "  If dnsmasq fails to start, you may need to stop systemd-resolved temporarily"
+else
+    echo "  ✓ Port 53 on 127.0.0.1 appears to be available"
+fi
+
+# Stop systemd-resolved's stub listener if needed (but keep the service running)
+# Actually, we keep DNSStubListener enabled, so this shouldn't be an issue
+
 systemctl enable dnsmasq
-systemctl restart dnsmasq
+
+# Try to start dnsmasq
+if systemctl restart dnsmasq; then
+    echo "  ✓ dnsmasq started successfully"
+else
+    echo "  ✗ Failed to start dnsmasq"
+    echo ""
+    echo "  Troubleshooting information:"
+    echo "  - Check dnsmasq status: systemctl status dnsmasq"
+    echo "  - Check dnsmasq logs: journalctl -xeu dnsmasq.service"
+    echo "  - Test configuration: dnsmasq --test"
+    echo "  - Check if blocked-domains.conf exists: ls -l ${INSTALL_DIR}/config/blocked-domains.conf"
+    echo ""
+    
+    # Try to get more specific error information
+    if journalctl -xeu dnsmasq.service --no-pager -n 10 2>/dev/null | grep -i "error\|fail"; then
+        echo "  Recent dnsmasq errors:"
+        journalctl -xeu dnsmasq.service --no-pager -n 5 2>/dev/null || true
+    fi
+    
+    echo ""
+    echo "  Common fixes:"
+    echo "  1. If 'address already in use': systemd-resolved may be using port 53"
+    echo "     Try: sudo systemctl stop systemd-resolved (temporarily)"
+    echo "  2. If 'conf-file not found': The block list file may be missing"
+    echo "     Check: ls -l ${INSTALL_DIR}/config/blocked-domains.conf"
+    echo "  3. If configuration error: Check /etc/dnsmasq.conf syntax"
+    echo ""
+    
+    exit 1
+fi
 
 # Restart systemd-resolved
 systemctl restart systemd-resolved
