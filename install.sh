@@ -92,6 +92,35 @@ fi
 
 cp "${INSTALL_DIR}/config/dnsmasq.conf" /etc/dnsmasq.conf
 
+# Fix permissions on /etc/dnsmasq.d if it exists
+# dnsmasq reads from this directory by default and needs read access
+# The dnsmasq user needs to be able to read this directory
+if [ -d /etc/dnsmasq.d ]; then
+    echo "  Fixing permissions on /etc/dnsmasq.d..."
+    # Ensure directory is readable and executable by all (755)
+    chmod 755 /etc/dnsmasq.d
+    # Ensure dnsmasq user/group can access it
+    chown root:dnsmasq /etc/dnsmasq.d 2>/dev/null || chown root:root /etc/dnsmasq.d
+    # Ensure any config files in the directory are readable
+    if [ -n "$(ls -A /etc/dnsmasq.d 2>/dev/null)" ]; then
+        chmod 644 /etc/dnsmasq.d/*.conf 2>/dev/null || true
+        chown root:dnsmasq /etc/dnsmasq.d/*.conf 2>/dev/null || chown root:root /etc/dnsmasq.d/*.conf 2>/dev/null || true
+    fi
+    echo "  ✓ Fixed /etc/dnsmasq.d permissions"
+elif [ ! -e /etc/dnsmasq.d ]; then
+    # Create the directory if it doesn't exist (some systems expect it)
+    echo "  Creating /etc/dnsmasq.d directory..."
+    mkdir -p /etc/dnsmasq.d
+    chmod 755 /etc/dnsmasq.d
+    # Try to set ownership to dnsmasq group if it exists
+    if getent group dnsmasq >/dev/null 2>&1; then
+        chown root:dnsmasq /etc/dnsmasq.d
+    else
+        chown root:root /etc/dnsmasq.d
+    fi
+    echo "  ✓ Created /etc/dnsmasq.d directory"
+fi
+
 # Install systemd service and timer
 echo "Step 6: Installing systemd service and timer..."
 cp "${INSTALL_DIR}/systemd/domain-blocker.service" /etc/systemd/system/
