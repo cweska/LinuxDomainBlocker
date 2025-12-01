@@ -51,20 +51,24 @@ for list in "${ALL_LISTS[@]}"; do
     url="${BASE_URL}/${list}.txt"
     output_file="${LISTS_DIR}/${list}.txt"
     
-    echo "  Downloading ${list}..."
+    # Format list name for display (replace hyphens with spaces, capitalize each word)
+    # Handle special cases like "smart-tv" -> "Smart TV"
+    display_name=$(echo "$list" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++){word=$i; sub(/./,toupper(substr(word,1,1)),word); $i=word} print}')
+    
+    echo "  Downloading ${display_name} domain list..."
     
     if curl -sSfL --max-time 30 --retry 3 "${url}" -o "${output_file}.tmp"; then
         # Check if file has content
         if [ -s "${output_file}.tmp" ]; then
             mv "${output_file}.tmp" "${output_file}"
-            echo "    ✓ Downloaded ${list} ($(wc -l < "${output_file}") lines)"
+            echo "    ✓ Downloaded ${display_name} domain list ($(wc -l < "${output_file}") lines)"
         else
             rm -f "${output_file}.tmp"
-            echo "    ⚠ ${list} is empty, skipping"
+            echo "    ⚠ ${display_name} domain list is empty, skipping"
         fi
     else
         rm -f "${output_file}.tmp"
-        echo "    ✗ Failed to download ${list}"
+        echo "    ✗ Failed to download ${display_name} domain list"
     fi
 done
 

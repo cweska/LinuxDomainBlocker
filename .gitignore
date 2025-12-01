@@ -13,7 +13,3 @@ lists/
 # OS files
 .DS_Store
 Thumbs.db
-
-# Vagrant
-.vagrant/
-*.box
