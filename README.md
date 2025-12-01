@@ -149,15 +149,27 @@ sudo ./harden.sh
    systemctl status dnsmasq
    ```
 
-2. Check systemd-resolved:
+2. If you see "Failed to set DNS configuration: Unit dbus-org.freedesktop.network1.service not found":
+   - This is a known issue with NetworkManager and systemd-resolved
+   - The fix has been applied in the install script (keeps DNSStubListener enabled)
+   - Restart dnsmasq: `sudo systemctl restart dnsmasq`
+   - Restart systemd-resolved: `sudo systemctl restart systemd-resolved`
+
+3. Check systemd-resolved:
    ```bash
    systemctl status systemd-resolved
    resolvectl status
    ```
 
-3. Check DNS resolution:
+4. Check DNS resolution:
    ```bash
    dig @127.0.0.1 google.com
+   ```
+
+5. Verify /etc/resolv.conf points to dnsmasq:
+   ```bash
+   cat /etc/resolv.conf
+   # Should show: nameserver 127.0.0.1
    ```
 
 ### Can't Access Whitelisted Sites

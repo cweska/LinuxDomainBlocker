@@ -74,15 +74,26 @@ if [ -f /etc/systemd/resolved.conf.backup.* ]; then
         echo "  ✓ Restored systemd-resolved.conf from backup"
     fi
 else
-    # Remove DNS=127.0.0.1 and restore DNSStubListener
+    # Remove DNS=127.0.0.1
     if [ -f /etc/systemd/resolved.conf ]; then
         sed -i '/^DNS=127.0.0.1/d' /etc/systemd/resolved.conf
-        sed -i 's/^DNSStubListener=no/DNSStubListener=yes/' /etc/systemd/resolved.conf
-        if ! grep -q "^DNSStubListener=" /etc/systemd/resolved.conf; then
-            echo "DNSStubListener=yes" >> /etc/systemd/resolved.conf
-        fi
+        sed -i '/^# DNSStubListener kept enabled/d' /etc/systemd/resolved.conf
     fi
     echo "  ✓ Restored systemd-resolved.conf defaults"
+fi
+
+# Restore /etc/resolv.conf if it was modified
+if [ -f /etc/resolv.conf.backup.* ]; then
+    BACKUP=$(ls -t /etc/resolv.conf.backup.* 2>/dev/null | head -1)
+    if [ -n "$BACKUP" ]; then
+        cp "$BACKUP" /etc/resolv.conf
+        echo "  ✓ Restored /etc/resolv.conf from backup"
+    fi
+elif [ ! -L /etc/resolv.conf ] && [ -f /etc/resolv.conf ]; then
+    # If it's not a symlink and was modified, restore to systemd-resolved symlink
+    rm -f /etc/resolv.conf
+    ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null || true
+    echo "  ✓ Restored /etc/resolv.conf to systemd-resolved symlink"
 fi
 
 # Remove systemd service files

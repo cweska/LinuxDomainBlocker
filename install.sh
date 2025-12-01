@@ -101,18 +101,39 @@ if [ -f /etc/systemd/resolved.conf ]; then
     cp /etc/systemd/resolved.conf /etc/systemd/resolved.conf.backup.$(date +%Y%m%d_%H%M%S)
     
     # Configure to use dnsmasq
+    # Keep DNSStubListener enabled to avoid D-Bus issues with NetworkManager
+    # Point DNS to localhost where dnsmasq is listening
     sed -i 's/#DNS=/DNS=127.0.0.1/' /etc/systemd/resolved.conf
-    sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf
     
     # Add DNS if not present
     if ! grep -q "^DNS=" /etc/systemd/resolved.conf; then
         echo "DNS=127.0.0.1" >> /etc/systemd/resolved.conf
     fi
     
-    # Disable stub listener if not already
+    # Keep DNSStubListener enabled (don't disable it) to work with NetworkManager
+    # This avoids the dbus-org.freedesktop.network1.service error
     if ! grep -q "^DNSStubListener=" /etc/systemd/resolved.conf; then
-        echo "DNSStubListener=no" >> /etc/systemd/resolved.conf
+        # Only add if not present - don't force it to 'no'
+        echo "# DNSStubListener kept enabled for NetworkManager compatibility" >> /etc/systemd/resolved.conf
     fi
+fi
+
+# Also configure /etc/resolv.conf to point to dnsmasq
+# This ensures compatibility even if systemd-resolved has issues
+if [ -L /etc/resolv.conf ]; then
+    # It's a symlink (systemd-resolved), which is fine
+    echo "  Note: /etc/resolv.conf is managed by systemd-resolved"
+else
+    # Backup and create new resolv.conf pointing to dnsmasq
+    if [ -f /etc/resolv.conf ]; then
+        cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d_%H%M%S)
+    fi
+    cat > /etc/resolv.conf << 'EOF'
+# Domain blocker DNS configuration
+# Managed by domain-blocker system
+nameserver 127.0.0.1
+EOF
+    echo "  ✓ Configured /etc/resolv.conf to use dnsmasq"
 fi
 
 # Enable and start dnsmasq
