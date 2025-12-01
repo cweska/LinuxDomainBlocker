@@ -2,6 +2,7 @@
 #
 # merge-lists.sh
 # Merges and formats block lists for dnsmasq
+# Optimized for performance using awk for bulk processing
 #
 
 set -euo pipefail
@@ -24,145 +25,146 @@ fi
 
 echo "Merging block lists..."
 
-# Read whitelist (use associative array if bash 4+, otherwise regular array)
-BASH_MAJOR_VERSION=${BASH_VERSION%%.*}
-if [ "${BASH_MAJOR_VERSION:-0}" -ge 4 ]; then
-    # Bash 4+ - use associative array for O(1) lookup
-    declare -A whitelist_domains=()
-    declare -A whitelist_lookup=()
-    if [ -f "${WHITELIST_FILE}" ]; then
-        while IFS= read -r line || [ -n "$line" ]; do
-            line=$(echo "$line" | sed 's/#.*$//' | xargs)
-            if [ -n "$line" ]; then
-                whitelist_domains["$line"]=1
-                whitelist_lookup["$line"]=1
-            fi
-        done < "${WHITELIST_FILE}"
-    fi
-    
-    is_whitelisted() {
-        local domain="$1"
-        local base_domain="$domain"
-        
-        # Check exact match first (fastest)
-        if [[ -n "${whitelist_domains[$domain]:-}" ]]; then
-            return 0
-        fi
-        
-        # Check subdomain matches
-        while [[ "$base_domain" =~ \. ]]; do
-            base_domain="${base_domain#*.}"
-            if [[ -n "${whitelist_domains[$base_domain]:-}" ]]; then
-                return 0
-            fi
-        done
-        return 1
-    }
-else
-    # Bash 3.x - use regular array (less efficient but compatible)
-    declare -a whitelist_domains=()
-    if [ -f "${WHITELIST_FILE}" ]; then
-        while IFS= read -r line || [ -n "$line" ]; do
-            line=$(echo "$line" | sed 's/#.*$//' | xargs)
-            if [ -n "$line" ]; then
-                whitelist_domains+=("$line")
-            fi
-        done < "${WHITELIST_FILE}"
-    fi
-    
-    is_whitelisted() {
-        local domain="$1"
-        local whitelist_domain
-        for whitelist_domain in "${whitelist_domains[@]+${whitelist_domains[@]}}"; do
-            if [ "$domain" = "$whitelist_domain" ] || [[ "$domain" == *".$whitelist_domain" ]]; then
-                return 0
-            fi
-        done
-        return 1
-    }
+# Build whitelist for awk (create a temporary file with clean domains)
+WHITELIST_TEMP=$(mktemp)
+if [ -f "${WHITELIST_FILE}" ]; then
+    # Extract whitelist domains (remove comments, trim, filter empty)
+    awk '
+        {
+            # Remove comments
+            gsub(/#.*/, "")
+            # Trim whitespace
+            gsub(/^[ \t]+|[ \t]+$/, "")
+            # Output non-empty lines
+            if (length($0) > 0) {
+                print $0
+            }
+        }
+    ' "${WHITELIST_FILE}" > "${WHITELIST_TEMP}"
 fi
 
-# Process all list files
-total_domains=0
-blocked_count=0
-whitelisted_count=0
-
-for list_file in "${LISTS_DIR}"/*.txt; do
-    if [ ! -f "$list_file" ]; then
-        continue
-    fi
+# Use awk for fast bulk processing
+# This is much faster than bash loops for large files (10-100x speedup)
+STATS_FILE=$(mktemp)
+awk -v whitelist_file="${WHITELIST_TEMP}" -v stats_file="${STATS_FILE}" '
+BEGIN {
+    # Load whitelist into associative array for fast lookup
+    if (whitelist_file != "" && whitelist_file != "/dev/null") {
+        while ((getline line < whitelist_file) > 0) {
+            whitelist[line] = 1
+        }
+        close(whitelist_file)
+    }
     
-    list_name=$(basename "$list_file" .txt)
-    echo "  Processing ${list_name}..."
-    
-    while IFS= read -r line || [ -n "$line" ]; do
-        # Skip comments and empty lines (combined operations for speed)
-        line="${line%%#*}"  # Remove comments
-        line="${line#"${line%%[![:space:]]*}"}"  # Trim leading whitespace
-        line="${line%"${line##*[![:space:]]}"}"  # Trim trailing whitespace
-        
-        if [ -z "$line" ]; then
-            continue
-        fi
-        
-        # Extract domain from various formats (optimized - single pass where possible)
-        domain="$line"
-        
-        # Remove protocol (http://, https://, //)
-        domain="${domain#http://}"
-        domain="${domain#https://}"
-        domain="${domain#//}"
-        
-        # Remove leading IP addresses and whitespace
-        if [[ "$domain" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}[[:space:]]+ ]]; then
-            domain="${domain#*[[:space:]]}"
-            domain="${domain#"${domain%%[![:space:]]*}"}"  # Trim leading whitespace
-        elif [[ "$domain" =~ ^[0-9.]+[[:space:]]+ ]]; then
-            domain="${domain#*[[:space:]]}"
-            domain="${domain#"${domain%%[![:space:]]*}"}"  # Trim leading whitespace
-        fi
-        
-        # Remove trailing paths and ports
-        domain="${domain%%/*}"  # Remove path
-        domain="${domain%%:*}"  # Remove port
-        domain="${domain%"${domain##*[![:space:]]}"}"  # Trim trailing whitespace
-        
-        # Validate domain format (basic check - must contain at least one dot and valid characters)
-        # Allow domains like example.com, sub.example.com, etc.
-        # Check: has at least one dot, doesn't start/end with dot, no double dots, valid characters
-        if [[ -n "$domain" ]] && \
-           [[ "$domain" =~ \. ]] && \
-           [[ ! "$domain" =~ ^\. ]] && \
-           [[ ! "$domain" =~ \.$ ]] && \
-           [[ ! "$domain" =~ \.\..* ]] && \
-           [[ "$domain" =~ ^[a-zA-Z0-9] ]] && \
-           [[ "$domain" =~ [a-zA-Z0-9]$ ]] && \
-           [[ "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9.\-]*[a-zA-Z0-9]$ ]]; then
-            total_domains=$((total_domains + 1))
-            
-            # Check whitelist
-            if is_whitelisted "$domain"; then
-                whitelisted_count=$((whitelisted_count + 1))
-                continue
-            fi
-            
-            # Add to output (dnsmasq format: address=/domain/IP)
-            # Block both IPv4 (0.0.0.0) and IPv6 (::) for complete blocking
-            echo "address=/${domain}/0.0.0.0" >> "${TEMP_FILE}"
-            echo "address=/${domain}/::" >> "${TEMP_FILE}"
-            blocked_count=$((blocked_count + 1))
-        fi
-    done < "$list_file"
-done
+    total_domains = 0
+    blocked_count = 0
+    whitelisted_count = 0
+}
 
-# Sort and deduplicate
-echo "  Sorting and deduplicating..."
-sort -u "${TEMP_FILE}" > "${OUTPUT_FILE}"
-rm -f "${TEMP_FILE}"
+{
+    # Remove comments
+    gsub(/#.*/, "")
+    
+    # Trim leading/trailing whitespace
+    gsub(/^[ \t]+|[ \t]+$/, "")
+    
+    # Skip empty lines
+    if (length($0) == 0) {
+        next
+    }
+    
+    domain = $0
+    
+    # Remove protocol prefixes (http://, https://, //)
+    gsub(/^https?:\/\//, "", domain)
+    gsub(/^\/\//, "", domain)
+    
+    # Remove leading IP addresses (format: IP domain)
+    # Match IP address followed by whitespace
+    if (match(domain, /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}[ \t]+/)) {
+        domain = substr(domain, RLENGTH + 1)
+        gsub(/^[ \t]+/, "", domain)  # Trim leading whitespace
+    }
+    
+    # Remove trailing paths and ports
+    # Remove everything after / (path)
+    if (match(domain, /\//)) {
+        domain = substr(domain, 1, RSTART - 1)
+    }
+    # Remove everything after : (port)
+    if (match(domain, /:/)) {
+        domain = substr(domain, 1, RSTART - 1)
+    }
+    
+    # Trim trailing whitespace again
+    gsub(/[ \t]+$/, "", domain)
+    
+    # Validate domain format
+    # Must: have at least one dot, not start/end with dot, no double dots, valid chars
+    if (length(domain) > 0 && 
+        index(domain, ".") > 0 &&
+        !match(domain, /^\./) &&
+        !match(domain, /\.$/) &&
+        !match(domain, /\.\./) &&
+        match(domain, /^[a-zA-Z0-9]/) &&
+        match(domain, /[a-zA-Z0-9]$/) &&
+        match(domain, /^[a-zA-Z0-9][a-zA-Z0-9.\-]*[a-zA-Z0-9]$/)) {
+        
+        total_domains++
+        
+        # Check whitelist (exact match and subdomain matches)
+        is_whitelisted = 0
+        
+        # Check exact match
+        if (domain in whitelist) {
+            is_whitelisted = 1
+        } else {
+            # Check subdomain matches (e.g., sub.example.com matches example.com)
+            base_domain = domain
+            while (index(base_domain, ".") > 0) {
+                base_domain = substr(base_domain, index(base_domain, ".") + 1)
+                if (base_domain in whitelist) {
+                    is_whitelisted = 1
+                    break
+                }
+            }
+        }
+        
+        if (is_whitelisted) {
+            whitelisted_count++
+        } else {
+            # Output both IPv4 and IPv6 entries
+            print "address=/" domain "/0.0.0.0"
+            print "address=/" domain "/::"
+            blocked_count++
+        }
+    }
+}
+
+END {
+    # Write statistics to file
+    print total_domains " " blocked_count " " whitelisted_count > stats_file
+    close(stats_file)
+}
+' "${LISTS_DIR}"/*.txt 2>/dev/null | sort -u > "${TEMP_FILE}"
+
+# Read statistics
+read -r TOTAL_DOMAINS BLOCKED_COUNT WHITELISTED_COUNT < "${STATS_FILE}" || {
+    TOTAL_DOMAINS=0
+    BLOCKED_COUNT=0
+    WHITELISTED_COUNT=0
+}
+rm -f "${STATS_FILE}"
+
+# Move sorted output to final location
+mv "${TEMP_FILE}" "${OUTPUT_FILE}"
+
+# Cleanup
+rm -f "${WHITELIST_TEMP}"
 
 echo "Merge complete:"
-echo "  Total domains processed: ${total_domains}"
-echo "  Domains blocked: ${blocked_count}"
-echo "  Domains whitelisted: ${whitelisted_count}"
+echo "  Total domains processed: ${TOTAL_DOMAINS:-0}"
+echo "  Domains blocked: ${BLOCKED_COUNT:-0}"
+echo "  Domains whitelisted: ${WHITELISTED_COUNT:-0}"
 echo "  Output file: ${OUTPUT_FILE}"
 
