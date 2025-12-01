@@ -61,9 +61,15 @@ EOF
     assert_file_exists "${output_file}" || return 1
     
     # Verify output contains blocked domains (dnsmasq format)
+    # Check IPv4 entries
     assert_file_contains "${output_file}" "address=/ads.example.com/0.0.0.0" || return 1
     assert_file_contains "${output_file}" "address=/tracking-site.com/0.0.0.0" || return 1
     assert_file_contains "${output_file}" "address=/malware-site.com/0.0.0.0" || return 1
+    
+    # Verify IPv6 entries are also present
+    assert_file_contains "${output_file}" "address=/ads.example.com/::" || return 1
+    assert_file_contains "${output_file}" "address=/tracking-site.com/::" || return 1
+    assert_file_contains "${output_file}" "address=/malware-site.com/::" || return 1
     
     # Verify whitelisted domain is NOT in output
     assert_file_not_contains "${output_file}" "example-ads.com" || {
@@ -71,9 +77,31 @@ EOF
         return 1
     }
     
-    # Verify format is correct (address=/domain/0.0.0.0)
+    # Verify format is correct (address=/domain/IP)
     if ! grep -q "^address=/" "${output_file}"; then
         echo "FAIL: Output format is incorrect"
+        return 1
+    fi
+    
+    # Verify we have both IPv4 and IPv6 entries for each domain
+    # Count IPv4 entries (0.0.0.0)
+    local ipv4_count=$(grep -c "/0.0.0.0$" "${output_file}" || echo "0")
+    # Count IPv6 entries (::)
+    local ipv6_count=$(grep -c "/::$" "${output_file}" || echo "0")
+    
+    if [ "$ipv4_count" -eq 0 ]; then
+        echo "FAIL: No IPv4 entries found in output"
+        return 1
+    fi
+    
+    if [ "$ipv6_count" -eq 0 ]; then
+        echo "FAIL: No IPv6 entries found in output"
+        return 1
+    fi
+    
+    # IPv4 and IPv6 counts should be equal (one of each per domain)
+    if [ "$ipv4_count" -ne "$ipv6_count" ]; then
+        echo "FAIL: IPv4 and IPv6 entry counts don't match (IPv4: $ipv4_count, IPv6: $ipv6_count)"
         return 1
     fi
     

@@ -146,8 +146,10 @@ for list_file in "${LISTS_DIR}"/*.txt; do
                 continue
             fi
             
-            # Add to output (dnsmasq format: address=/domain/0.0.0.0)
+            # Add to output (dnsmasq format: address=/domain/IP)
+            # Block both IPv4 (0.0.0.0) and IPv6 (::) for complete blocking
             echo "address=/${domain}/0.0.0.0" >> "${TEMP_FILE}"
+            echo "address=/${domain}/::" >> "${TEMP_FILE}"
             blocked_count=$((blocked_count + 1))
         fi
     done < "$list_file"

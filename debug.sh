@@ -70,11 +70,19 @@ if [ -f /etc/dnsmasq.conf ]; then
         echo "    Fix: Add 'conf-file=${INSTALL_DIR}/config/blocked-domains.conf' to /etc/dnsmasq.conf"
     fi
     
-    # Check if dnsmasq is listening on 127.0.0.1
+    # Check if dnsmasq is listening on IPv4
     if grep -q "listen-address=127.0.0.1" /etc/dnsmasq.conf; then
-        echo "  ✓ dnsmasq is configured to listen on 127.0.0.1"
+        echo "  ✓ dnsmasq is configured to listen on 127.0.0.1 (IPv4)"
     else
-        echo "  ✗ dnsmasq is NOT configured to listen on 127.0.0.1"
+        echo "  ✗ dnsmasq is NOT configured to listen on 127.0.0.1 (IPv4)"
+    fi
+    
+    # Check if dnsmasq is listening on IPv6
+    if grep -q "listen-address=::1" /etc/dnsmasq.conf; then
+        echo "  ✓ dnsmasq is configured to listen on ::1 (IPv6)"
+    else
+        echo "  ⚠ dnsmasq is NOT configured to listen on ::1 (IPv6)"
+        echo "    IPv6 requests will not be blocked"
     fi
     
     # Check if dnsmasq has actually loaded the config
@@ -91,13 +99,13 @@ else
 fi
 echo ""
 
-echo "4. Testing DNS resolution..."
+echo "4. Testing DNS resolution (IPv4)..."
 echo "  Testing direct query to dnsmasq (127.0.0.1):"
 FACEBOOK_RESULT=$(dig @127.0.0.1 facebook.com +short +timeout=2 2>&1 | head -1)
 if [ -n "$FACEBOOK_RESULT" ] && [ "$FACEBOOK_RESULT" != "connection timed out" ]; then
     echo "  facebook.com resolves to: $FACEBOOK_RESULT"
     if [ "$FACEBOOK_RESULT" = "0.0.0.0" ]; then
-        echo "  ✓ facebook.com is correctly blocked (returns 0.0.0.0)"
+        echo "  ✓ facebook.com is correctly blocked (IPv4 returns 0.0.0.0)"
     else
         echo "  ✗ facebook.com is NOT blocked (returns: $FACEBOOK_RESULT)"
         echo "    This means either:"
@@ -107,6 +115,25 @@ if [ -n "$FACEBOOK_RESULT" ] && [ "$FACEBOOK_RESULT" != "connection timed out" ]
     fi
 else
     echo "  ✗ Cannot query dnsmasq - service may not be running or not responding"
+fi
+
+# Test IPv6 resolution
+echo ""
+echo "  Testing IPv6 resolution (::1):"
+if command -v dig >/dev/null 2>&1; then
+    FACEBOOK_IPV6_RESULT=$(dig @::1 facebook.com AAAA +short +timeout=2 2>&1 | head -1)
+    if [ -n "$FACEBOOK_IPV6_RESULT" ] && [ "$FACEBOOK_IPV6_RESULT" != "connection timed out" ]; then
+        echo "  facebook.com IPv6 resolves to: $FACEBOOK_IPV6_RESULT"
+        if [ "$FACEBOOK_IPV6_RESULT" = "::" ]; then
+            echo "  ✓ facebook.com is correctly blocked (IPv6 returns ::)"
+        else
+            echo "  ⚠ facebook.com IPv6 blocking status unclear (returns: $FACEBOOK_IPV6_RESULT)"
+        fi
+    else
+        echo "  ⚠ Cannot test IPv6 - dig may not support IPv6 or dnsmasq not listening on ::1"
+    fi
+else
+    echo "  ⚠ Cannot test IPv6 - dig command not available"
 fi
 
 # Test with a domain that should definitely be blocked
@@ -119,8 +146,17 @@ if [ -f "${BLOCKED_FILE}" ] && [ -s "${BLOCKED_FILE}" ]; then
         echo "  Testing ${TEST_DOMAIN} (from block list):"
         TEST_RESULT=$(dig @127.0.0.1 "${TEST_DOMAIN}" +short +timeout=2 2>&1 | head -1)
         if [ "$TEST_RESULT" = "0.0.0.0" ]; then
-            echo "  ✓ ${TEST_DOMAIN} is correctly blocked"
-            echo "    This confirms dnsmasq IS reading the block list correctly"
+            echo "  ✓ ${TEST_DOMAIN} is correctly blocked (IPv4)"
+            # Test IPv6
+            TEST_IPV6_RESULT=$(dig @::1 "${TEST_DOMAIN}" AAAA +short +timeout=2 2>&1 | head -1)
+            if [ "$TEST_IPV6_RESULT" = "::" ]; then
+                echo "  ✓ ${TEST_DOMAIN} is correctly blocked (IPv6)"
+                echo "    This confirms dnsmasq IS reading the block list correctly for both IPv4 and IPv6"
+            elif [ -n "$TEST_IPV6_RESULT" ] && [ "$TEST_IPV6_RESULT" != "connection timed out" ]; then
+                echo "  ⚠ ${TEST_DOMAIN} IPv6 blocking may not be working (returns: $TEST_IPV6_RESULT)"
+            else
+                echo "  ⚠ Cannot verify IPv6 blocking for ${TEST_DOMAIN}"
+            fi
         else
             echo "  ✗ ${TEST_DOMAIN} is NOT blocked (returns: $TEST_RESULT)"
             echo "    This indicates dnsmasq is NOT using the block list!"

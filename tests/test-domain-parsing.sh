@@ -79,12 +79,22 @@ EOF
     }
     
     # Verify all entries are in correct dnsmasq format
+    # Should be either IPv4 (0.0.0.0) or IPv6 (::) format
     while IFS= read -r line; do
-        if [[ ! "$line" =~ ^address=/[^/]+/0\.0\.0\.0$ ]]; then
+        if [[ ! "$line" =~ ^address=/[^/]+/(0\.0\.0\.0|::)$ ]]; then
             echo "FAIL: Invalid format in output: $line"
             return 1
         fi
     done < "${output_file}"
+    
+    # Verify we have both IPv4 and IPv6 entries
+    local ipv4_count=$(grep -c "/0.0.0.0$" "${output_file}" || echo "0")
+    local ipv6_count=$(grep -c "/::$" "${output_file}" || echo "0")
+    
+    if [ "$ipv4_count" -eq 0 ] || [ "$ipv6_count" -eq 0 ]; then
+        echo "FAIL: Missing IPv4 or IPv6 entries (IPv4: $ipv4_count, IPv6: $ipv6_count)"
+        return 1
+    fi
     
     echo "PASS: Domain parsing works correctly"
     return 0

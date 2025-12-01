@@ -10,6 +10,7 @@ This solution uses **dnsmasq** as a local DNS server to block malicious, inappro
 
 - **Comprehensive Blocking**: Blocks all domains from blocklistproject/Lists including:
   - Ads, Malware, Phishing, Piracy, Porn, Ransomware, Scam, Tracking, and more
+- **IPv4 and IPv6 Support**: Blocks domains on both IPv4 and IPv6 networks
 - **Automatic Updates**: Daily automatic updates via systemd timer
 - **Whitelist Support**: Easy whitelisting of required domains (ROS 2, GitHub, etc.)
 - **Security Hardening**: Multiple layers of protection against circumvention
