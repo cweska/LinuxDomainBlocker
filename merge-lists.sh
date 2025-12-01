@@ -24,30 +24,63 @@ fi
 
 echo "Merging block lists..."
 
-# Read whitelist into array (skip comments and empty lines)
-declare -a whitelist_domains=()
-if [ -f "${WHITELIST_FILE}" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-        # Skip comments and empty lines
-        line=$(echo "$line" | sed 's/#.*$//' | xargs)
-        if [ -n "$line" ]; then
-            whitelist_domains+=("$line")
-        fi
-    done < "${WHITELIST_FILE}"
-fi
-
-# Function to check if domain is whitelisted
-is_whitelisted() {
-    local domain="$1"
-    local whitelist_domain
-    for whitelist_domain in "${whitelist_domains[@]+${whitelist_domains[@]}}"; do
-        # Check exact match or subdomain match
-        if [ "$domain" = "$whitelist_domain" ] || [[ "$domain" == *".$whitelist_domain" ]]; then
+# Read whitelist (use associative array if bash 4+, otherwise regular array)
+BASH_MAJOR_VERSION=${BASH_VERSION%%.*}
+if [ "${BASH_MAJOR_VERSION:-0}" -ge 4 ]; then
+    # Bash 4+ - use associative array for O(1) lookup
+    declare -A whitelist_domains=()
+    declare -A whitelist_lookup=()
+    if [ -f "${WHITELIST_FILE}" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line=$(echo "$line" | sed 's/#.*$//' | xargs)
+            if [ -n "$line" ]; then
+                whitelist_domains["$line"]=1
+                whitelist_lookup["$line"]=1
+            fi
+        done < "${WHITELIST_FILE}"
+    fi
+    
+    is_whitelisted() {
+        local domain="$1"
+        local base_domain="$domain"
+        
+        # Check exact match first (fastest)
+        if [[ -n "${whitelist_domains[$domain]:-}" ]]; then
             return 0
         fi
-    done
-    return 1
-}
+        
+        # Check subdomain matches
+        while [[ "$base_domain" =~ \. ]]; do
+            base_domain="${base_domain#*.}"
+            if [[ -n "${whitelist_domains[$base_domain]:-}" ]]; then
+                return 0
+            fi
+        done
+        return 1
+    }
+else
+    # Bash 3.x - use regular array (less efficient but compatible)
+    declare -a whitelist_domains=()
+    if [ -f "${WHITELIST_FILE}" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line=$(echo "$line" | sed 's/#.*$//' | xargs)
+            if [ -n "$line" ]; then
+                whitelist_domains+=("$line")
+            fi
+        done < "${WHITELIST_FILE}"
+    fi
+    
+    is_whitelisted() {
+        local domain="$1"
+        local whitelist_domain
+        for whitelist_domain in "${whitelist_domains[@]+${whitelist_domains[@]}}"; do
+            if [ "$domain" = "$whitelist_domain" ] || [[ "$domain" == *".$whitelist_domain" ]]; then
+                return 0
+            fi
+        done
+        return 1
+    }
+fi
 
 # Process all list files
 total_domains=0
@@ -63,31 +96,36 @@ for list_file in "${LISTS_DIR}"/*.txt; do
     echo "  Processing ${list_name}..."
     
     while IFS= read -r line || [ -n "$line" ]; do
-        # Skip comments and empty lines
-        line=$(echo "$line" | sed 's/#.*$//' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        # Skip comments and empty lines (combined operations for speed)
+        line="${line%%#*}"  # Remove comments
+        line="${line#"${line%%[![:space:]]*}"}"  # Trim leading whitespace
+        line="${line%"${line##*[![:space:]]}"}"  # Trim trailing whitespace
         
         if [ -z "$line" ]; then
             continue
         fi
         
-        # Extract domain from various formats
-        domain=""
+        # Extract domain from various formats (optimized - single pass where possible)
+        domain="$line"
         
-        # Handle different formats:
-        # - Plain domain: example.com
-        # - IP format: 0.0.0.0 example.com
-        # - Hosts format: 127.0.0.1 example.com
-        # - URL format: http://example.com or https://example.com
+        # Remove protocol (http://, https://, //)
+        domain="${domain#http://}"
+        domain="${domain#https://}"
+        domain="${domain#//}"
         
-        # Remove protocol
-        line=$(echo "$line" | sed -E 's|^https?://||' | sed 's|^//||')
-        
-        # Remove leading IP addresses and whitespace (portable for both GNU and BSD sed)
-        line=$(echo "$line" | sed -E 's|^[0-9]{1,3}(\.[0-9]{1,3}){3}[[:space:]]+||')
-        line=$(echo "$line" | sed -E 's|^[0-9.]+[[:space:]]+||')
+        # Remove leading IP addresses and whitespace
+        if [[ "$domain" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}[[:space:]]+ ]]; then
+            domain="${domain#*[[:space:]]}"
+            domain="${domain#"${domain%%[![:space:]]*}"}"  # Trim leading whitespace
+        elif [[ "$domain" =~ ^[0-9.]+[[:space:]]+ ]]; then
+            domain="${domain#*[[:space:]]}"
+            domain="${domain#"${domain%%[![:space:]]*}"}"  # Trim leading whitespace
+        fi
         
         # Remove trailing paths and ports
-        domain=$(echo "$line" | sed 's|/.*$||' | sed 's|:.*$||' | xargs)
+        domain="${domain%%/*}"  # Remove path
+        domain="${domain%%:*}"  # Remove port
+        domain="${domain%"${domain##*[![:space:]]}"}"  # Trim trailing whitespace
         
         # Validate domain format (basic check - must contain at least one dot and valid characters)
         # Allow domains like example.com, sub.example.com, etc.
