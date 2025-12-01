@@ -4,7 +4,7 @@ A comprehensive domain blocking solution for Ubuntu 24.04 that blocks all domain
 
 ## Overview
 
-This solution uses **dnsmasq** as a local DNS server to block malicious, inappropriate, and unwanted domains. It's designed for educational environments where you need to restrict internet access while allowing necessary development tools (like ROS 2).
+This solution uses **dnsmasq** as a local DNS server to block malicious, inappropriate, and unwanted domains. It's designed for educational environments where you need to restrict internet access while allowing necessary development tools.
 
 ## Features
 
