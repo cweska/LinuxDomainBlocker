@@ -10,7 +10,11 @@ SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 LISTS_DIR="${LISTS_DIR:-${SCRIPT_DIR}/lists}"
 BASE_URL="https://blocklistproject.github.io/Lists"
 
-# List of all primary block lists from the repository
+# List of all available block lists from blocklistproject/Lists
+# Excluding "everything" list as requested
+# Lists are organized by category for clarity
+
+# Primary lists (most commonly used)
 PRIMARY_LISTS=(
     "ads"
     "malware"
@@ -25,20 +29,26 @@ PRIMARY_LISTS=(
     "tracking"
 )
 
-# Beta lists
+# Beta lists (stable but newer)
 BETA_LISTS=(
     "smart-tv"
     "basic"
     "whatsapp"
     "vaping"
+    "gambling"
 )
 
-# Alpha lists
+# Alpha lists (experimental/newer)
 ALPHA_LISTS=(
     "adobe"
+    "crypto"
+    "drugs"
+    "facebook"
+    "snapchat"
+    "youtube"
 )
 
-# Combined list
+# Combined list (excluding "everything")
 ALL_LISTS=("${PRIMARY_LISTS[@]}" "${BETA_LISTS[@]}" "${ALPHA_LISTS[@]}")
 
 # Create lists directory
@@ -67,8 +77,14 @@ for list in "${ALL_LISTS[@]}"; do
             echo "    ⚠ ${display_name} domain list is empty, skipping"
         fi
     else
+        # Check if it's a 404 (list doesn't exist) vs other error
+        HTTP_CODE=$(curl -sSfL --max-time 30 --retry 1 -o /dev/null -w "%{http_code}" "${url}" 2>/dev/null || echo "000")
         rm -f "${output_file}.tmp"
-        echo "    ✗ Failed to download ${display_name} domain list"
+        if [ "$HTTP_CODE" = "404" ]; then
+            echo "    ⚠ ${display_name} domain list not available (404), skipping"
+        else
+            echo "    ✗ Failed to download ${display_name} domain list (HTTP ${HTTP_CODE})"
+        fi
     fi
 done
 

@@ -272,6 +272,69 @@ else
 fi
 echo ""
 
+# If a specific domain was provided as argument, check it in detail
+if [ -n "${1:-}" ]; then
+    CHECK_DOMAIN="$1"
+    echo ""
+    echo "=========================================="
+    echo "Detailed check for: $CHECK_DOMAIN"
+    echo "=========================================="
+    echo ""
+    
+    echo "1. Checking if $CHECK_DOMAIN is in block list:"
+    if grep -q "^address=/$CHECK_DOMAIN/" "${BLOCKED_FILE}" 2>/dev/null; then
+        echo "  ✓ $CHECK_DOMAIN IS in the block list"
+        grep "^address=/$CHECK_DOMAIN/" "${BLOCKED_FILE}" | head -2
+    else
+        echo "  ✗ $CHECK_DOMAIN is NOT in the block list"
+        echo ""
+        echo "  Checking if it's in any downloaded list files:"
+        FOUND_IN_LISTS=false
+        for list_file in "${INSTALL_DIR}/lists"/*.txt; do
+            if [ -f "$list_file" ] && grep -qi "$CHECK_DOMAIN" "$list_file" 2>/dev/null; then
+                list_name=$(basename "$list_file" .txt)
+                echo "    ✓ Found in ${list_name}.txt"
+                grep -i "$CHECK_DOMAIN" "$list_file" | head -3
+                FOUND_IN_LISTS=true
+            fi
+        done
+        if [ "$FOUND_IN_LISTS" = false ]; then
+            echo "    ✗ Not found in any downloaded list files"
+            echo "    This domain may not be in the blocklistproject lists"
+        else
+            echo ""
+            echo "  ⚠ Domain is in a list file but not in blocked-domains.conf"
+            echo "    This suggests the merge process may have filtered it out"
+            echo "    Run: sudo ${INSTALL_DIR}/update-blocker.sh"
+        fi
+    fi
+    echo ""
+    
+    echo "2. Testing DNS resolution for $CHECK_DOMAIN:"
+    echo "  Direct query to dnsmasq (127.0.0.1):"
+    DNS_RESULT=$(dig @127.0.0.1 "$CHECK_DOMAIN" +short +timeout=2 2>&1 | head -1)
+    if [ "$DNS_RESULT" = "0.0.0.0" ]; then
+        echo "  ✓ $CHECK_DOMAIN is correctly blocked (returns 0.0.0.0)"
+    else
+        echo "  ✗ $CHECK_DOMAIN is NOT blocked (returns: $DNS_RESULT)"
+        echo "    This means either:"
+        echo "    1. The domain is not in the block list"
+        echo "    2. dnsmasq is not reading the block list"
+        echo "    3. dnsmasq needs to be reloaded: sudo systemctl reload dnsmasq"
+    fi
+    echo ""
+    
+    echo "3. Testing system DNS resolution:"
+    SYSTEM_DNS=$(getent hosts "$CHECK_DOMAIN" 2>&1 | awk '{print $1}' | head -1)
+    if [ "$SYSTEM_DNS" = "0.0.0.0" ]; then
+        echo "  ✓ System DNS is blocking $CHECK_DOMAIN"
+    else
+        echo "  ⚠ System DNS resolves $CHECK_DOMAIN to: $SYSTEM_DNS"
+        echo "    This may indicate the system is not using dnsmasq"
+    fi
+    echo ""
+fi
+
 echo "=========================================="
 echo "Debug Summary"
 echo "=========================================="
