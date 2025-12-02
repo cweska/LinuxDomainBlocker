@@ -61,7 +61,26 @@ echo "Step 3: Copying files..."
 cp "${SCRIPT_DIR}/download-lists.sh" "${INSTALL_DIR}/"
 cp "${SCRIPT_DIR}/merge-lists.sh" "${INSTALL_DIR}/"
 cp "${SCRIPT_DIR}/update-blocker.sh" "${INSTALL_DIR}/"
-cp "${SCRIPT_DIR}/whitelist.txt" "${INSTALL_DIR}/"
+
+# Copy whitelist.txt if it exists, otherwise create a blank one
+if [ -f "${SCRIPT_DIR}/whitelist.txt" ]; then
+    cp "${SCRIPT_DIR}/whitelist.txt" "${INSTALL_DIR}/"
+else
+    cat > "${INSTALL_DIR}/whitelist.txt" << 'EOF'
+# Whitelist file for allowed domains
+# Add one domain per line (without http:// or https://)
+# Example: example.com
+#
+# To whitelist a domain, add it below (one per line):
+# example.com
+# subdomain.example.com
+#
+# Note: Subdomains are automatically whitelisted if the parent domain is whitelisted
+# For example, if "example.com" is whitelisted, "sub.example.com" will also be allowed
+EOF
+    echo "  ✓ Created blank whitelist.txt"
+fi
+
 cp "${SCRIPT_DIR}/config/dnsmasq.conf" "${INSTALL_DIR}/config/"
 cp "${SCRIPT_DIR}/systemd/domain-blocker.service" "${INSTALL_DIR}/systemd/"
 cp "${SCRIPT_DIR}/systemd/domain-blocker.timer" "${INSTALL_DIR}/systemd/"

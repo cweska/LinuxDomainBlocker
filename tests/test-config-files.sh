@@ -26,9 +26,9 @@ test_config_files() {
     local whitelist="${PROJECT_ROOT}/whitelist.txt"
     assert_file_exists "${whitelist}" || return 1
     
-    # Verify it contains ROS 2 domains
-    assert_file_contains "${whitelist}" "ros.org" || return 1
-    assert_file_contains "${whitelist}" "github.com" || return 1
+    # Verify it has the proper format (contains comment header)
+    assert_file_contains "${whitelist}" "Whitelist file for allowed domains" || return 1
+    assert_file_contains "${whitelist}" "Add one domain per line" || return 1
     
     # Test 3: systemd service file exists
     local service_file="${PROJECT_ROOT}/systemd/domain-blocker.service"
