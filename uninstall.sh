@@ -6,13 +6,15 @@
 
 set -euo pipefail
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
+# Check if running as root (skip when running in test mode)
+if [ "${TEST_MODE:-0}" != "1" ] && [ "$EUID" -ne 0 ]; then
     echo "Error: This script must be run as root (use sudo)"
     exit 1
 fi
 
 INSTALL_DIR="/opt/domain-blocker"
+RESOLV_CONF_PATH="${RESOLV_CONF_PATH:-/etc/resolv.conf}"
+RESOLVED_RUN_DIR="${RESOLVED_RUN_DIR:-/run/systemd/resolve}"
 
 echo "=========================================="
 echo "Linux Domain Blocker Uninstallation"
@@ -74,28 +76,32 @@ if [ -f /etc/systemd/resolved.conf.backup.* ]; then
         echo "  ✓ Restored systemd-resolved.conf from backup"
     fi
 else
-    # Remove DNS=127.0.0.1 (use temp file to avoid permission issues)
+    # Remove DNS overrides (use temp file to avoid permission issues)
     if [ -f /etc/systemd/resolved.conf ]; then
         TMP_RESOLVED=$(mktemp)
         sed '/^DNS=127.0.0.1/d' /etc/systemd/resolved.conf | \
-            sed '/^# DNSStubListener kept enabled/d' > "${TMP_RESOLVED}"
+            sed '/^DNSStubListener=no/d' > "${TMP_RESOLVED}"
         mv "${TMP_RESOLVED}" /etc/systemd/resolved.conf
     fi
     echo "  ✓ Restored systemd-resolved.conf defaults"
 fi
 
 # Restore /etc/resolv.conf if it was modified
-if [ -f /etc/resolv.conf.backup.* ]; then
-    BACKUP=$(ls -t /etc/resolv.conf.backup.* 2>/dev/null | head -1)
+if [ -f ${RESOLV_CONF_PATH}.backup.* ]; then
+    BACKUP=$(ls -t ${RESOLV_CONF_PATH}.backup.* 2>/dev/null | head -1)
     if [ -n "$BACKUP" ]; then
-        cp "$BACKUP" /etc/resolv.conf
+        cp "$BACKUP" "${RESOLV_CONF_PATH}"
         echo "  ✓ Restored /etc/resolv.conf from backup"
     fi
-elif [ ! -L /etc/resolv.conf ] && [ -f /etc/resolv.conf ]; then
-    # If it's not a symlink and was modified, restore to systemd-resolved symlink
-    rm -f /etc/resolv.conf
-    ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null || true
-    echo "  ✓ Restored /etc/resolv.conf to systemd-resolved symlink"
+elif [ ! -L "${RESOLV_CONF_PATH}" ] && [ -f "${RESOLV_CONF_PATH}" ]; then
+    # If it's not a symlink and was modified, restore to systemd-resolved stub symlink
+    if rm -f "${RESOLV_CONF_PATH}" 2>/dev/null; then
+        ln -s "${RESOLVED_RUN_DIR}/stub-resolv.conf" "${RESOLV_CONF_PATH}" 2>/dev/null || \
+            ln -s "${RESOLVED_RUN_DIR}/resolv.conf" "${RESOLV_CONF_PATH}" 2>/dev/null || true
+        echo "  ✓ Restored /etc/resolv.conf to systemd-resolved symlink"
+    else
+        echo "  ⚠ Unable to replace ${RESOLV_CONF_PATH}; please check permissions"
+    fi
 fi
 
 # Remove systemd service files
