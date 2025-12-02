@@ -1,0 +1,196 @@
+# Static Games Block List
+# Common game domains, game launchers, and gaming platforms
+# This list is merged with dynamic lists from blocklistproject/Lists
+
+# Steam and Valve
+steamcommunity.com
+steampowered.com
+steam-chat.com
+steamcontent.com
+steamstat.us
+steamusercontent.com
+valvesoftware.com
+valve.net
+
+# Epic Games
+epicgames.com
+epicgames.store
+unrealengine.com
+fortnite.com
+epicgameslauncher.com
+
+# Blizzard/Activision
+battle.net
+blizzard.com
+activision.com
+callofduty.com
+overwatch.com
+worldofwarcraft.com
+diablo.com
+hearthstone.com
+
+# Riot Games
+riotgames.com
+leagueoflegends.com
+valorant.com
+teamfighttactics.com
+wildrift.com
+
+# EA/Origin
+ea.com
+origin.com
+eagames.com
+fifa.com
+apexlegends.com
+battlefield.com
+thesims.com
+
+# Ubisoft
+ubisoft.com
+ubisoftconnect.com
+assassinscreed.com
+far-cry.com
+rainbow6.com
+watch-dogs.com
+
+# Rockstar Games
+rockstargames.com
+gta5.com
+reddeadredemption.com
+
+# Bethesda
+bethesda.net
+elderscrolls.com
+fallout.com
+doom.com
+
+# Microsoft/Xbox
+xbox.com
+xboxlive.com
+xboxgamepass.com
+minecraft.net
+minecraft.com
+
+# Sony/PlayStation
+playstation.com
+playstationnetwork.com
+psn.com
+sonyentertainmentnetwork.com
+
+# Nintendo
+nintendo.com
+nintendo.net
+nintendo-europe.com
+
+# Other Major Publishers
+2k.com
+take2games.com
+bandainamcoent.com
+capcom.com
+konami.com
+square-enix.com
+sega.com
+warnerbrosgames.com
+wbgames.com
+
+# Game Launchers
+gog.com
+gogalaxy.com
+itch.io
+humblebundle.com
+humble.com
+twitch.tv
+discord.com
+discordapp.com
+discord.gg
+
+# Gaming Platforms
+gamejolt.com
+gamebanana.com
+nexusmods.com
+moddb.com
+curseforge.com
+gamepedia.com
+
+# Mobile Games
+supercell.com
+king.com
+candycrush.com
+clashofclans.com
+pokemongo.com
+pokemon.com
+angrybirds.com
+
+# MMO Games
+finalfantasyxiv.com
+ffxiv.com
+guildwars2.com
+elder-scrolls-online.com
+eso.com
+blackdesertonline.com
+bdo.com
+archeage.com
+tera.com
+aion.com
+
+# Popular Game Titles
+counter-strike.net
+csgo.com
+dota2.com
+dota.com
+pubg.com
+playerunknown.com
+apexlegendsgame.com
+destinythegame.com
+destiny.com
+warframe.com
+pathofexile.com
+poe.com
+warhammer.com
+totalwar.com
+civilization.com
+civ.com
+roblox.com
+robloxlabs.com
+robloxcdn.com
+robloxgames.com
+robloxapp.com
+roblox.qq.com
+
+# Game Streaming
+mixer.com
+dlive.tv
+trovo.live
+
+# Game Stores
+greenmangaming.com
+gmg.com
+fanatical.com
+gamesplanet.com
+gamesload.com
+gamesrepublic.com
+
+# Game Communities
+gamefaqs.com
+gamespot.com
+ign.com
+kotaku.com
+polygon.com
+pcgamer.com
+
+# Game Development Platforms
+unity.com
+unity3d.com
+unrealengine.com
+godotengine.org
+gamemaker.io
+construct.net
+rpgmaker.com
+
+# Additional Gaming Services
+gamepass.com
+xcloud.com
+stadia.google.com
+geforcenow.com
+shadow.tech
+parsec.app

@@ -9,6 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 LISTS_DIR="${LISTS_DIR:-${SCRIPT_DIR}/lists}"
+STATIC_DIR="${STATIC_DIR:-${SCRIPT_DIR}/static}"
 WHITELIST_FILE="${WHITELIST_FILE:-${SCRIPT_DIR}/whitelist.txt}"
 OUTPUT_FILE="${OUTPUT_FILE:-${SCRIPT_DIR}/config/blocked-domains.conf}"
 TEMP_FILE=$(mktemp)
@@ -24,6 +25,37 @@ if [ ! -f "${WHITELIST_FILE}" ]; then
 fi
 
 echo "Merging block lists..."
+echo "  Including dynamic lists from ${LISTS_DIR}"
+
+# Build list of files to process
+FILES_TO_PROCESS=()
+# Add dynamic lists
+if [ -d "${LISTS_DIR}" ]; then
+    while IFS= read -r -d '' file; do
+        FILES_TO_PROCESS+=("$file")
+    done < <(find "${LISTS_DIR}" -maxdepth 1 -name "*.txt" -type f -print0 2>/dev/null)
+fi
+
+# Add static lists
+if [ -d "${STATIC_DIR}" ]; then
+    while IFS= read -r -d '' file; do
+        FILES_TO_PROCESS+=("$file")
+    done < <(find "${STATIC_DIR}" -maxdepth 1 -name "*.txt" -type f -print0 2>/dev/null)
+    if [ ${#FILES_TO_PROCESS[@]} -gt 0 ] && [ -n "$(find "${STATIC_DIR}" -maxdepth 1 -name "*.txt" -type f 2>/dev/null)" ]; then
+        echo "  Including static lists from ${STATIC_DIR}"
+    fi
+fi
+
+if [ ${#FILES_TO_PROCESS[@]} -eq 0 ]; then
+    echo "  WARNING: No block list files found to process"
+    touch "${OUTPUT_FILE}"
+    echo "Merge complete:"
+    echo "  Total domains processed: 0"
+    echo "  Domains blocked: 0"
+    echo "  Domains whitelisted: 0"
+    echo "  Output file: ${OUTPUT_FILE}"
+    exit 0
+fi
 
 # Build whitelist for awk (create a temporary file with clean domains)
 WHITELIST_TEMP=$(mktemp)
@@ -162,7 +194,7 @@ END {
     print total_domains " " blocked_count " " whitelisted_count > stats_file
     close(stats_file)
 }
-' "${LISTS_DIR}"/*.txt 2>/dev/null | sort -u > "${TEMP_FILE}"
+' "${FILES_TO_PROCESS[@]}" 2>/dev/null | sort -u > "${TEMP_FILE}"
 
 # Read statistics
 read -r TOTAL_DOMAINS BLOCKED_COUNT WHITELISTED_COUNT < "${STATS_FILE}" || {

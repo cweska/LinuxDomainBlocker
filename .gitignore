@@ -1,6 +1,8 @@
 # Lists directory (downloaded block lists)
 lists/
 *.txt
+# Exception: static lists should be tracked
+!static/*.txt
 
 # Logs
 *.log
