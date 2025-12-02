@@ -197,6 +197,35 @@ if [ -f /etc/systemd/resolved.conf ]; then
     echo "  ✓ Configured systemd-resolved to use dnsmasq"
 fi
 
+# Configure NetworkManager to use dnsmasq (ignore DHCP DNS)
+echo "Step 8.5: Configuring NetworkManager to use dnsmasq..."
+if command -v nmcli >/dev/null 2>&1; then
+    # Get all active connections
+    ACTIVE_CONNECTIONS=$(nmcli -t -f NAME connection show --active 2>/dev/null || true)
+    
+    if [ -n "$ACTIVE_CONNECTIONS" ]; then
+        echo "$ACTIVE_CONNECTIONS" | while IFS= read -r conn; do
+            if [ -n "$conn" ] && [ "$conn" != "lo" ]; then
+                echo "  Configuring connection: $conn"
+                # Set DNS to localhost (dnsmasq)
+                nmcli connection modify "$conn" ipv4.dns "127.0.0.1" 2>/dev/null || true
+                nmcli connection modify "$conn" ipv4.ignore-auto-dns yes 2>/dev/null || true
+                nmcli connection modify "$conn" ipv6.dns "::1" 2>/dev/null || true
+                nmcli connection modify "$conn" ipv6.ignore-auto-dns yes 2>/dev/null || true
+            fi
+        done
+        
+        # Restart NetworkManager to apply changes
+        systemctl restart NetworkManager 2>/dev/null || true
+        sleep 2
+        echo "  ✓ Configured NetworkManager to use dnsmasq"
+    else
+        echo "  ⚠ No active NetworkManager connections found"
+    fi
+else
+    echo "  ⚠ NetworkManager (nmcli) not found, skipping NetworkManager configuration"
+fi
+
 # Also configure /etc/resolv.conf to point to dnsmasq
 # This ensures compatibility even if systemd-resolved has issues
 if [ -L /etc/resolv.conf ]; then
