@@ -30,6 +30,10 @@ test_merge_lists() {
 example-ads.com
 ads.example.com
 tracking-site.com
+# IP addresses that should be filtered out
+0.0.0.0
+127.0.0.1
+192.168.1.1
 EOF
     
     # Create test list 2
@@ -77,6 +81,22 @@ EOF
         return 1
     }
     
+    # Verify IP addresses are NOT in output (they should be filtered out)
+    assert_file_not_contains "${output_file}" "address=/0.0.0.0/" || {
+        echo "FAIL: IP address 0.0.0.0 should be filtered out"
+        return 1
+    }
+    
+    assert_file_not_contains "${output_file}" "address=/127.0.0.1/" || {
+        echo "FAIL: IP address 127.0.0.1 should be filtered out"
+        return 1
+    }
+    
+    assert_file_not_contains "${output_file}" "address=/192.168.1.1/" || {
+        echo "FAIL: IP address 192.168.1.1 should be filtered out"
+        return 1
+    }
+    
     # Verify format is correct (address=/domain/IP)
     if ! grep -q "^address=/" "${output_file}"; then
         echo "FAIL: Output format is incorrect"
@@ -109,6 +129,61 @@ EOF
     local duplicate_count=$(sort "${output_file}" | uniq -d | wc -l | xargs)
     if [ "$duplicate_count" -ne 0 ]; then
         echo "FAIL: Found duplicate entries in output"
+        return 1
+    fi
+    
+    # Comprehensive format validation
+    echo "  Validating output format..."
+    local invalid_lines=0
+    local line_num=0
+    
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+        
+        # Skip empty lines (shouldn't exist, but check anyway)
+        if [ -z "$line" ]; then
+            echo "FAIL: Empty line found at line $line_num"
+            invalid_lines=$((invalid_lines + 1))
+            continue
+        fi
+        
+        # Check format: address=/domain/IP
+        if [[ ! "$line" =~ ^address=/[^/]+/(0\.0\.0\.0|::)$ ]]; then
+            echo "FAIL: Invalid format at line $line_num: $line"
+            invalid_lines=$((invalid_lines + 1))
+            continue
+        fi
+        
+        # Extract domain from line
+        domain=$(echo "$line" | sed 's|^address=/||' | sed 's|/.*||')
+        
+        # Validate domain name format
+        if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9.\-]*[a-zA-Z0-9]$ ]] || \
+           [[ "$domain" =~ \.\\. ]] || \
+           [[ "$domain" =~ ^\. ]] || \
+           [[ "$domain" =~ \.$ ]]; then
+            echo "FAIL: Invalid domain format at line $line_num: $domain"
+            invalid_lines=$((invalid_lines + 1))
+            continue
+        fi
+        
+        # Ensure domain has at least one dot
+        if [[ ! "$domain" =~ \. ]]; then
+            echo "FAIL: Domain missing TLD at line $line_num: $domain"
+            invalid_lines=$((invalid_lines + 1))
+            continue
+        fi
+        
+    done < "${output_file}"
+    
+    if [ "$invalid_lines" -gt 0 ]; then
+        echo "FAIL: Found $invalid_lines invalid line(s) in output"
+        return 1
+    fi
+    
+    # Verify output is sorted (dnsmasq works better with sorted lists)
+    if ! sort -c "${output_file}" 2>/dev/null; then
+        echo "FAIL: Output file is not sorted"
         return 1
     fi
     

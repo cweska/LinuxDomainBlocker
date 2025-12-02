@@ -105,25 +105,13 @@ BEGIN {
     }
     
     # Reject IP addresses (both IPv4 and IPv6)
-    # IPv4: 0.0.0.0 to 255.255.255.255
+    # IPv4: Check if domain matches IP address pattern
     if (match(domain, /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/)) {
-        # Additional validation: check if it's a valid IP range
-        split(domain, octets, ".")
-        is_valid_ip = 1
-        for (i = 1; i <= 4; i++) {
-            if (octets[i] < 0 || octets[i] > 255) {
-                is_valid_ip = 0
-                break
-            }
-        }
-        if (is_valid_ip) {
-            next  # Skip IP addresses
-        }
+        next
     }
-    
-    # IPv6: contains colons (simplified check)
-    if (match(domain, /:/)) {
-        next  # Skip IPv6 addresses
+    # IPv6: contains colons
+    if (index(domain, ":") > 0) {
+        next
     }
     
     # Validate domain format

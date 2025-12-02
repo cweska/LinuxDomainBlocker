@@ -36,6 +36,13 @@ domain-with-subdomain.sub.example.com
 invalid..double-dot.com
 .invalid-leading-dot.com
 invalid-trailing-dot.com.
+# IP addresses that should be rejected
+0.0.0.0
+127.0.0.1
+192.168.1.1
+255.255.255.255
+::1
+2001:db8::1
 EOF
     
     # Empty whitelist
@@ -77,6 +84,40 @@ EOF
         echo "FAIL: Invalid domain with trailing dot should be rejected"
         return 1
     }
+    
+    # Verify IP addresses are rejected (should not appear as domains)
+    assert_file_not_contains "${output_file}" "address=/0.0.0.0/" || {
+        echo "FAIL: IP address 0.0.0.0 should be rejected"
+        return 1
+    }
+    
+    assert_file_not_contains "${output_file}" "address=/127.0.0.1/" || {
+        echo "FAIL: IP address 127.0.0.1 should be rejected"
+        return 1
+    }
+    
+    assert_file_not_contains "${output_file}" "address=/192.168.1.1/" || {
+        echo "FAIL: IP address 192.168.1.1 should be rejected"
+        return 1
+    }
+    
+    assert_file_not_contains "${output_file}" "address=/255.255.255.255/" || {
+        echo "FAIL: IP address 255.255.255.255 should be rejected"
+        return 1
+    }
+    
+    # IPv6 addresses should also be rejected
+    # Note: IPv6 addresses with colons would fail domain validation anyway,
+    # but we should verify they're not in the output
+    if grep -q "address=/::" "${output_file}" 2>/dev/null; then
+        # If we find "address=/::" it should only be for IPv6 blocking entries, not IP addresses
+        # Check that it's not a standalone IP
+        if grep -q "^address=/::1/" "${output_file}" 2>/dev/null || \
+           grep -q "^address=/2001:db8::1/" "${output_file}" 2>/dev/null; then
+            echo "FAIL: IPv6 addresses should be rejected"
+            return 1
+        fi
+    fi
     
     # Verify all entries are in correct dnsmasq format
     # Should be either IPv4 (0.0.0.0) or IPv6 (::) format
