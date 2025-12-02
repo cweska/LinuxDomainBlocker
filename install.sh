@@ -81,6 +81,20 @@ EOF
     echo "  ✓ Created blank whitelist.txt"
 fi
 
+# Copy static directory if it exists
+if [ -d "${SCRIPT_DIR}/static" ]; then
+    echo "  Copying static block lists..."
+    mkdir -p "${INSTALL_DIR}/static"
+    cp -r "${SCRIPT_DIR}/static"/* "${INSTALL_DIR}/static/" 2>/dev/null || true
+    if [ -n "$(ls -A "${INSTALL_DIR}/static" 2>/dev/null)" ]; then
+        echo "  ✓ Copied static block lists to ${INSTALL_DIR}/static"
+    fi
+else
+    # Create empty static directory for future use
+    mkdir -p "${INSTALL_DIR}/static"
+    echo "  ✓ Created static directory (empty)"
+fi
+
 cp "${SCRIPT_DIR}/config/dnsmasq.conf" "${INSTALL_DIR}/config/"
 cp "${SCRIPT_DIR}/systemd/domain-blocker.service" "${INSTALL_DIR}/systemd/"
 cp "${SCRIPT_DIR}/systemd/domain-blocker.timer" "${INSTALL_DIR}/systemd/"

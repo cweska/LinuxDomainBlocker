@@ -38,12 +38,22 @@ fi
 
 # Add static lists
 if [ -d "${STATIC_DIR}" ]; then
+    STATIC_COUNT=0
     while IFS= read -r -d '' file; do
         FILES_TO_PROCESS+=("$file")
+        STATIC_COUNT=$((STATIC_COUNT + 1))
     done < <(find "${STATIC_DIR}" -maxdepth 1 -name "*.txt" -type f -print0 2>/dev/null)
-    if [ ${#FILES_TO_PROCESS[@]} -gt 0 ] && [ -n "$(find "${STATIC_DIR}" -maxdepth 1 -name "*.txt" -type f 2>/dev/null)" ]; then
-        echo "  Including static lists from ${STATIC_DIR}"
+    if [ $STATIC_COUNT -gt 0 ]; then
+        echo "  Including static lists from ${STATIC_DIR} ($STATIC_COUNT file(s))"
+        # List the static files being included
+        find "${STATIC_DIR}" -maxdepth 1 -name "*.txt" -type f 2>/dev/null | while read -r file; do
+            filename=$(basename "$file")
+            line_count=$(wc -l < "$file" 2>/dev/null || echo "0")
+            echo "    - ${filename} (${line_count} lines)"
+        done
     fi
+else
+    echo "  ⚠ Static directory not found: ${STATIC_DIR}"
 fi
 
 if [ ${#FILES_TO_PROCESS[@]} -eq 0 ]; then
