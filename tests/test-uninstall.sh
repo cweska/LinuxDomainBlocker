@@ -39,9 +39,11 @@ test_uninstall() {
     mkdir -p "${MOCK_ETC_DIR}"/sudoers.d
     mkdir -p "${MOCK_ETC_DIR}"/apparmor.d/local
     mkdir -p "${MOCK_ETC_DIR}"/logrotate.d
+    mkdir -p "${MOCK_ETC_DIR}"/run/systemd/resolve
     
     echo "# dnsmasq config" > "${etc_dnsmasq}"
     echo "# resolved config" > "${etc_resolved}"
+    echo "# resolv config" > "${MOCK_ETC_DIR}/resolv.conf"
     echo "[Unit]" > "${systemd_service}"
     echo "[Timer]" > "${systemd_timer}"
     echo "# sudo restrictions" > "${sudoers_file}"
@@ -80,10 +82,8 @@ test_uninstall() {
     perl -i -pe "s|/etc/apparmor.d/|${MOCK_ETC_DIR}/apparmor.d/|g" "${test_uninstall_script}"
     perl -i -pe "s|/etc/logrotate.d/|${MOCK_ETC_DIR}/logrotate.d/|g" "${test_uninstall_script}"
     # Bypass root check for testing - comment out the check
-    perl -i -pe 's|^if \[ "\$EUID" -ne 0 \]; then|# Root check bypassed for testing\nif \[ "${TEST_MODE:-0}" != "1" \] && \[ "$EUID" -ne 0 \]; then|' "${test_uninstall_script}"
-    
     # Mock the read prompt to auto-confirm and set TEST_MODE
-    TEST_MODE=1 bash "${test_uninstall_script}" <<< "y" > /dev/null 2>&1 || {
+    TEST_MODE=1 RESOLV_CONF_PATH="${MOCK_ETC_DIR}/resolv.conf" RESOLVED_RUN_DIR="${MOCK_ETC_DIR}/run/systemd/resolve" bash "${test_uninstall_script}" <<< "y" > /dev/null 2>&1 || {
         echo "FAIL: uninstall script failed to execute"
         return 1
     }
@@ -185,10 +185,9 @@ test_uninstall() {
     perl -i -pe "s|/etc/dnsmasq.conf|${etc_dnsmasq}|g" "${test_uninstall_script}"
     perl -i -pe "s|/etc/systemd/resolved.conf|${etc_resolved}|g" "${test_uninstall_script}"
     perl -i -pe "s|/etc/systemd/system/|${MOCK_SYSTEMD_DIR}/|g" "${test_uninstall_script}"
-    perl -i -pe 's|^if \[ "\$EUID" -ne 0 \]; then|# Root check bypassed for testing\nif \[ "${TEST_MODE:-0}" != "1" \] && \[ "$EUID" -ne 0 \]; then|' "${test_uninstall_script}"
     
     # Run uninstall without backups
-    TEST_MODE=1 bash "${test_uninstall_script}" <<< "y" > /dev/null 2>&1 || {
+    TEST_MODE=1 RESOLV_CONF_PATH="${MOCK_ETC_DIR}/resolv.conf" RESOLVED_RUN_DIR="${MOCK_ETC_DIR}/run/systemd/resolve" bash "${test_uninstall_script}" <<< "y" > /dev/null 2>&1 || {
         echo "FAIL: uninstall script failed without backups"
         return 1
     }

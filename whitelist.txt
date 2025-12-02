@@ -1,0 +1,5 @@
+# Whitelist for allowed domains
+# Add one domain per line without protocol prefixes
+# Essential services
+ros.org
+github.com

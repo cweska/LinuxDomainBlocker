@@ -146,55 +146,75 @@ if [ ! -f "${INSTALL_DIR}/config/blocked-domains.conf" ]; then
     echo "# Blocked domains will be populated by update-blocker.sh" > "${INSTALL_DIR}/config/blocked-domains.conf"
 fi
 
-# Configure systemd-resolved to use dnsmasq
+# Configure systemd-resolved to use dnsmasq directly
 echo "Step 8: Configuring systemd-resolved..."
 if [ -f /etc/systemd/resolved.conf ]; then
     # Backup
     cp /etc/systemd/resolved.conf /etc/systemd/resolved.conf.backup.$(date +%Y%m%d_%H%M%S)
-    
-    # Configure to use dnsmasq
-    # Keep DNSStubListener enabled to avoid D-Bus issues with NetworkManager
-    # Point DNS to localhost where dnsmasq is listening
-    # Use a temp file approach to avoid permission issues with sed -i
+
+    # Force DNS to dnsmasq and disable the stub listener so clients query 127.0.0.1 directly
     TMP_RESOLVED=$(mktemp)
-    
-    # Process the file
-    sed 's/#DNS=/DNS=127.0.0.1/' /etc/systemd/resolved.conf > "${TMP_RESOLVED}"
-    
-    # Add DNS if not present
-    if ! grep -q "^DNS=" "${TMP_RESOLVED}"; then
-        echo "DNS=127.0.0.1" >> "${TMP_RESOLVED}"
-    fi
-    
-    # Keep DNSStubListener enabled (don't disable it) to work with NetworkManager
-    # This avoids the dbus-org.freedesktop.network1.service error
-    if ! grep -q "^DNSStubListener=" "${TMP_RESOLVED}"; then
-        # Only add if not present - don't force it to 'no'
-        echo "# DNSStubListener kept enabled for NetworkManager compatibility" >> "${TMP_RESOLVED}"
-    fi
-    
-    # Replace the original file
+    awk '
+        BEGIN {
+            in_resolve = 0;
+            resolve_seen = 0;
+            dns_set = 0;
+            stub_set = 0;
+        }
+
+        /^\[Resolve\]/ {
+            in_resolve = 1;
+            resolve_seen = 1;
+            print;
+            next;
+        }
+
+        /^\[/ {
+            if (in_resolve) {
+                if (!dns_set) { print "DNS=127.0.0.1"; dns_set = 1; }
+                if (!stub_set) { print "DNSStubListener=no"; stub_set = 1; }
+            }
+            in_resolve = 0;
+            print;
+            next;
+        }
+
+        {
+            if (in_resolve && /^DNS=/) { if (!dns_set) { print "DNS=127.0.0.1"; dns_set = 1; } next; }
+            if (in_resolve && /^DNSStubListener=/) { if (!stub_set) { print "DNSStubListener=no"; stub_set = 1; } next; }
+            print;
+        }
+
+        END {
+            if (in_resolve) {
+                if (!dns_set) print "DNS=127.0.0.1";
+                if (!stub_set) print "DNSStubListener=no";
+            } else if (!resolve_seen) {
+                print "[Resolve]";
+                print "DNS=127.0.0.1";
+                print "DNSStubListener=no";
+            }
+        }
+    ' /etc/systemd/resolved.conf > "${TMP_RESOLVED}"
+
     mv "${TMP_RESOLVED}" /etc/systemd/resolved.conf
-    echo "  ✓ Configured systemd-resolved to use dnsmasq"
+    echo "  ✓ Configured systemd-resolved to use dnsmasq and disable stub listener"
 fi
 
-# Also configure /etc/resolv.conf to point to dnsmasq
-# This ensures compatibility even if systemd-resolved has issues
-if [ -L /etc/resolv.conf ]; then
-    # It's a symlink (systemd-resolved), which is fine
-    echo "  Note: /etc/resolv.conf is managed by systemd-resolved"
-else
-    # Backup and create new resolv.conf pointing to dnsmasq
-    if [ -f /etc/resolv.conf ]; then
-        cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d_%H%M%S)
-    fi
-    cat > /etc/resolv.conf << 'EOF'
+# Also configure /etc/resolv.conf to point to dnsmasq directly
+# This ensures compatibility even if systemd-resolved previously managed a stub
+if [ -f /etc/resolv.conf ] || [ -L /etc/resolv.conf ]; then
+    cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+fi
+
+rm -f /etc/resolv.conf
+cat > /etc/resolv.conf << 'EOF'
 # Domain blocker DNS configuration
 # Managed by domain-blocker system
 nameserver 127.0.0.1
+options edns0
 EOF
-    echo "  ✓ Configured /etc/resolv.conf to use dnsmasq"
-fi
+echo "  ✓ Configured /etc/resolv.conf to use dnsmasq"
 
 # Enable and start dnsmasq
 echo "Step 9: Starting dnsmasq service..."
@@ -236,9 +256,6 @@ if [ "$PORT_53_IN_USE" = true ]; then
 else
     echo "  ✓ Port 53 on 127.0.0.1 appears to be available"
 fi
-
-# Stop systemd-resolved's stub listener if needed (but keep the service running)
-# Actually, we keep DNSStubListener enabled, so this shouldn't be an issue
 
 systemctl enable dnsmasq
 

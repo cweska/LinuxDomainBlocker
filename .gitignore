@@ -1,6 +1,8 @@
 # Lists directory (downloaded block lists)
 lists/
 *.txt
+# Keep the bundled whitelist under version control
+!whitelist.txt
 
 # Logs
 *.log
