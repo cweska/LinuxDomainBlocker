@@ -122,6 +122,8 @@ if command -v apparmor_parser &> /dev/null; then
   # Allow reading config files
   /etc/dnsmasq.conf r,
   /opt/domain-blocker/config/* r,
+  /etc/dnsmasq.d/ r,
+  /etc/dnsmasq.d/** r,
   
   # Allow network operations
   network,
