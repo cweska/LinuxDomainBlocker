@@ -46,7 +46,8 @@ fi
 # Install required packages
 echo "Step 1: Installing required packages..."
 apt-get update
-apt-get install -y dnsmasq curl systemd iptables ipset iptables-persistent
+# Use DEBIAN_FRONTEND=noninteractive to prevent iptables-persistent debconf prompts
+DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq curl systemd iptables ipset iptables-persistent
 
 # Create installation directory
 echo "Step 2: Creating installation directory..."
