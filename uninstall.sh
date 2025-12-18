@@ -257,7 +257,7 @@ ip6tables -t nat -D OUTPUT -p tcp --dport 53 ! -d ::1 -j DNAT --to-destination [
 iptables -D OUTPUT -p tcp --dport 853 -j DROP 2>/dev/null || true
 ip6tables -D OUTPUT -p tcp --dport 853 -j DROP 2>/dev/null || true
 
-# Remove ipset rules and sets
+# Remove ipset rules and sets (if ipset is available)
 if command -v ipset &> /dev/null; then
     iptables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
     iptables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
@@ -266,6 +266,33 @@ if command -v ipset &> /dev/null; then
     ipset destroy doh-providers 2>/dev/null || true
     ipset destroy doh-providers-v6 2>/dev/null || true
 fi
+
+# Also remove individual per-IP iptables rules (created when ipset was unavailable during install)
+# These need to be cleaned up regardless of whether ipset is currently available
+DOH_PROVIDERS=(
+    "1.1.1.1" "1.0.0.1" "104.16.248.249" "104.16.249.249"  # Cloudflare
+    "8.8.8.8" "8.8.4.4"                                      # Google
+    "9.9.9.9" "149.112.112.112"                              # Quad9
+    "208.67.222.222" "208.67.220.220"                        # OpenDNS
+    "45.90.28.0" "45.90.30.0"                                # NextDNS
+    "94.140.14.14" "94.140.15.15"                            # AdGuard DNS
+    "185.228.168.168" "185.228.169.168"                      # CleanBrowsing
+)
+DOH_PROVIDERS_V6=(
+    "2606:4700:4700::1111" "2606:4700:4700::1001"  # Cloudflare
+    "2001:4860:4860::8888" "2001:4860:4860::8844"  # Google
+    "2620:fe::fe" "2620:fe::9"                      # Quad9
+)
+
+for ip in "${DOH_PROVIDERS[@]}"; do
+    iptables -D OUTPUT -p tcp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -p udp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+done
+
+for ip in "${DOH_PROVIDERS_V6[@]}"; do
+    ip6tables -D OUTPUT -p tcp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p udp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+done
 
 # Save the cleaned up iptables rules
 if command -v netfilter-persistent >/dev/null 2>&1; then
