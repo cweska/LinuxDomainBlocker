@@ -41,11 +41,18 @@ case "$ACTION" in
             
             log_message "Forced DNS settings on connection: ${CONNECTION_NAME}"
             
-            # Restart the connection to apply changes (only if it's not already being set up)
-            # Note: We use 'down' and 'up' carefully to avoid loops
+            # Apply the changes to the active connection
+            # Use 'nmcli device reapply' which is safer than down/up (no disconnect)
             if [ "$ACTION" = "dhcp4-change" ] || [ "$ACTION" = "dhcp6-change" ]; then
-                # Don't restart on DHCP changes to avoid infinite loops
-                log_message "Skipping restart on DHCP change event"
+                # Don't reapply on DHCP changes to avoid infinite loops
+                log_message "Skipping reapply on DHCP change event"
+            else
+                # For 'up' and 'connectivity-change' events, apply the DNS settings immediately
+                if nmcli device reapply "$INTERFACE" 2>/dev/null; then
+                    log_message "Applied DNS settings to device: ${INTERFACE}"
+                else
+                    log_message "Warning: Failed to reapply settings to ${INTERFACE} (may already be applied)"
+                fi
             fi
         fi
         ;;
@@ -55,3 +62,4 @@ case "$ACTION" in
 esac
 
 exit 0
+
