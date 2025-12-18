@@ -96,27 +96,30 @@ DOH_PROVIDERS_V6=(
 
 # Create ipset for DoH providers (more efficient than individual rules)
 if command -v ipset &> /dev/null; then
-    # Create or flush the ipset
+    # First, remove iptables rules that reference the ipsets (so sets can be destroyed)
+    iptables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
+    
+    # Now destroy and recreate the ipsets fresh
     ipset destroy doh-providers 2>/dev/null || true
-    ipset create doh-providers hash:ip 2>/dev/null || true
+    ipset create doh-providers hash:ip
     
     ipset destroy doh-providers-v6 2>/dev/null || true
-    ipset create doh-providers-v6 hash:ip family inet6 2>/dev/null || true
+    ipset create doh-providers-v6 hash:ip family inet6
     
     # Add IPs to the set
     for ip in "${DOH_PROVIDERS[@]}"; do
-        ipset add doh-providers "$ip" 2>/dev/null || true
+        ipset add doh-providers "$ip"
     done
     
     for ip in "${DOH_PROVIDERS_V6[@]}"; do
-        ipset add doh-providers-v6 "$ip" 2>/dev/null || true
+        ipset add doh-providers-v6 "$ip"
     done
     
-    # Remove old rules and add new ones
-    iptables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    # Add the iptables rules referencing the ipsets
     iptables -A OUTPUT -p tcp --dport 443 -m set --match-set doh-providers dst -j DROP
-    
-    ip6tables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
     ip6tables -A OUTPUT -p tcp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP
     
     echo "  ✓ DNS-over-HTTPS providers blocked (using ipset)"
@@ -142,10 +145,8 @@ fi
 # ============================================
 # Some browsers use QUIC (UDP 443) for DoH
 if command -v ipset &> /dev/null; then
-    iptables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    # UDP rules were deleted earlier when recreating ipsets; just add them
     iptables -A OUTPUT -p udp --dport 443 -m set --match-set doh-providers dst -j DROP
-    
-    ip6tables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
     ip6tables -A OUTPUT -p udp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP
 else
     for ip in "${DOH_PROVIDERS[@]}"; do
@@ -166,3 +167,4 @@ echo "Firewall rules applied successfully!"
 echo ""
 echo "Note: These rules are not persistent across reboots."
 echo "Run 'netfilter-persistent save' or use iptables-save to persist."
+
