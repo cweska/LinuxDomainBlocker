@@ -46,7 +46,7 @@ fi
 # Install required packages
 echo "Step 1: Installing required packages..."
 apt-get update
-apt-get install -y dnsmasq curl systemd
+apt-get install -y dnsmasq curl systemd iptables ipset iptables-persistent
 
 # Create installation directory
 echo "Step 2: Creating installation directory..."
@@ -238,6 +238,37 @@ if command -v nmcli >/dev/null 2>&1; then
     fi
 else
     echo "  ⚠ NetworkManager (nmcli) not found, skipping NetworkManager configuration"
+fi
+
+# Install NetworkManager dispatcher script to force DNS on ALL new connections
+echo "Step 8.6: Installing NetworkManager dispatcher script..."
+if [ -d /etc/NetworkManager/dispatcher.d ]; then
+    cp "${SCRIPT_DIR}/config/99-force-local-dns" /etc/NetworkManager/dispatcher.d/
+    chmod 755 /etc/NetworkManager/dispatcher.d/99-force-local-dns
+    chown root:root /etc/NetworkManager/dispatcher.d/99-force-local-dns
+    echo "  ✓ Installed dispatcher script for new network connections"
+else
+    echo "  ⚠ NetworkManager dispatcher directory not found, skipping"
+fi
+
+# Apply firewall rules to redirect DNS and block DoH/DoT bypasses
+echo "Step 8.7: Applying firewall rules to prevent DNS bypasses..."
+cp "${SCRIPT_DIR}/config/firewall-rules.sh" "${INSTALL_DIR}/config/"
+chmod +x "${INSTALL_DIR}/config/firewall-rules.sh"
+if "${INSTALL_DIR}/config/firewall-rules.sh"; then
+    echo "  ✓ Firewall rules applied"
+    # Save iptables rules to persist across reboots
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save 2>/dev/null || true
+        echo "  ✓ Firewall rules saved for persistence"
+    elif command -v iptables-save >/dev/null 2>&1; then
+        mkdir -p /etc/iptables
+        iptables-save > /etc/iptables/rules.v4
+        ip6tables-save > /etc/iptables/rules.v6
+        echo "  ✓ Firewall rules saved to /etc/iptables/"
+    fi
+else
+    echo "  ⚠ Warning: Failed to apply some firewall rules"
 fi
 
 # Also configure /etc/resolv.conf to point to dnsmasq

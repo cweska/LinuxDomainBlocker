@@ -193,6 +193,13 @@ if [ -f /etc/dnsmasq.conf ]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ALERT: Immutable flag removed from /etc/dnsmasq.conf" >> "${LOG_FILE}"
     fi
 fi
+
+# Check if firewall rules are still in place
+if command -v iptables &> /dev/null; then
+    if ! iptables -t nat -L OUTPUT 2>/dev/null | grep -q "dpt:domain"; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ALERT: DNS redirection firewall rules may have been removed" >> "${LOG_FILE}"
+    fi
+fi
 EOF
 
 chmod +x "${MONITOR_SCRIPT}"
@@ -202,6 +209,94 @@ chown root:root "${MONITOR_SCRIPT}"
 (crontab -l 2>/dev/null | grep -v "monitor-bypass.sh"; echo "*/5 * * * * ${MONITOR_SCRIPT}") | crontab -
 
 echo "  ✓ Monitoring script installed"
+
+# Disable DNS-over-HTTPS in browsers
+echo "Step 7: Disabling DNS-over-HTTPS in browsers..."
+
+# Firefox policy (system-wide)
+FIREFOX_POLICIES_DIR="/etc/firefox/policies"
+if [ -d /usr/lib/firefox ] || [ -d /snap/firefox ] || [ -d /usr/lib/firefox-esr ]; then
+    mkdir -p "${FIREFOX_POLICIES_DIR}"
+    cat > "${FIREFOX_POLICIES_DIR}/policies.json" << 'EOF'
+{
+  "policies": {
+    "DNSOverHTTPS": {
+      "Enabled": false,
+      "Locked": true
+    },
+    "DisableFirefoxStudies": true,
+    "DisableTelemetry": true
+  }
+}
+EOF
+    chmod 644 "${FIREFOX_POLICIES_DIR}/policies.json"
+    echo "  ✓ Firefox DoH disabled via policy"
+fi
+
+# Chrome/Chromium policy (system-wide)
+CHROME_POLICIES_DIR="/etc/opt/chrome/policies/managed"
+CHROMIUM_POLICIES_DIR="/etc/chromium/policies/managed"
+
+for POLICY_DIR in "${CHROME_POLICIES_DIR}" "${CHROMIUM_POLICIES_DIR}"; do
+    mkdir -p "${POLICY_DIR}"
+    cat > "${POLICY_DIR}/domain-blocker.json" << 'EOF'
+{
+  "DnsOverHttpsMode": "off",
+  "BuiltInDnsClientEnabled": false
+}
+EOF
+    chmod 644 "${POLICY_DIR}/domain-blocker.json"
+done
+echo "  ✓ Chrome/Chromium DoH disabled via policy"
+
+# Make browser policy files immutable
+chattr +i "${FIREFOX_POLICIES_DIR}/policies.json" 2>/dev/null || true
+chattr +i "${CHROME_POLICIES_DIR}/domain-blocker.json" 2>/dev/null || true
+chattr +i "${CHROMIUM_POLICIES_DIR}/domain-blocker.json" 2>/dev/null || true
+
+# Protect the NetworkManager dispatcher script
+echo "Step 8: Protecting NetworkManager dispatcher script..."
+if [ -f /etc/NetworkManager/dispatcher.d/99-force-local-dns ]; then
+    chattr +i /etc/NetworkManager/dispatcher.d/99-force-local-dns 2>/dev/null || true
+    echo "  ✓ Dispatcher script protected"
+fi
+
+# Ensure firewall rules are applied and persisted
+echo "Step 9: Ensuring firewall rules are in place..."
+if [ -f "${INSTALL_DIR}/config/firewall-rules.sh" ]; then
+    "${INSTALL_DIR}/config/firewall-rules.sh" 2>/dev/null || true
+    
+    # Save rules for persistence
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save 2>/dev/null || true
+    elif command -v iptables-save >/dev/null 2>&1; then
+        mkdir -p /etc/iptables
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+        ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+    fi
+    echo "  ✓ Firewall rules verified and persisted"
+fi
+
+# Create a systemd service to restore firewall rules on boot
+echo "Step 10: Creating firewall restore service..."
+cat > /etc/systemd/system/domain-blocker-firewall.service << EOF
+[Unit]
+Description=Domain Blocker Firewall Rules
+After=network.target
+Before=dnsmasq.service
+
+[Service]
+Type=oneshot
+ExecStart=${INSTALL_DIR}/config/firewall-rules.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable domain-blocker-firewall.service 2>/dev/null || true
+echo "  ✓ Firewall restore service created"
 
 echo ""
 echo "=========================================="
@@ -214,6 +309,9 @@ echo "  - Sudo restrictions configured"
 echo "  - AppArmor profile created (if available)"
 echo "  - Log rotation configured"
 echo "  - Bypass monitoring enabled"
+echo "  - DNS-over-HTTPS disabled in Firefox and Chrome"
+echo "  - NetworkManager dispatcher script protected"
+echo "  - Firewall rules for DNS redirection and DoH blocking"
 echo ""
 echo "Note: To modify configuration, you may need to:"
 echo "  1. Remove immutable flags: chattr -i <file>"

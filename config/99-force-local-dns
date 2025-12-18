@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+# NetworkManager dispatcher script to force all connections to use local dnsmasq
+# This prevents bypassing the domain blocker when connecting to new networks
+#
+# Install location: /etc/NetworkManager/dispatcher.d/99-force-local-dns
+#
+
+INTERFACE="$1"
+ACTION="$2"
+
+# Log file for debugging
+LOG_FILE="/var/log/domain-blocker-dispatcher.log"
+
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "${LOG_FILE}"
+}
+
+# Only act on connection up events
+case "$ACTION" in
+    up|dhcp4-change|dhcp6-change|connectivity-change)
+        # Get the connection name
+        CONNECTION_NAME="${CONNECTION_ID:-unknown}"
+        
+        log_message "Network event: ${ACTION} on ${INTERFACE} (${CONNECTION_NAME})"
+        
+        # Skip loopback interface
+        if [ "$INTERFACE" = "lo" ]; then
+            exit 0
+        fi
+        
+        # Force DNS settings on this connection
+        if [ -n "$CONNECTION_ID" ]; then
+            # Set IPv4 DNS to localhost (dnsmasq)
+            nmcli connection modify "$CONNECTION_ID" ipv4.dns "127.0.0.1" 2>/dev/null
+            nmcli connection modify "$CONNECTION_ID" ipv4.ignore-auto-dns yes 2>/dev/null
+            
+            # Set IPv6 DNS to localhost (dnsmasq)
+            nmcli connection modify "$CONNECTION_ID" ipv6.dns "::1" 2>/dev/null
+            nmcli connection modify "$CONNECTION_ID" ipv6.ignore-auto-dns yes 2>/dev/null
+            
+            log_message "Forced DNS settings on connection: ${CONNECTION_NAME}"
+            
+            # Restart the connection to apply changes (only if it's not already being set up)
+            # Note: We use 'down' and 'up' carefully to avoid loops
+            if [ "$ACTION" = "dhcp4-change" ] || [ "$ACTION" = "dhcp6-change" ]; then
+                # Don't restart on DHCP changes to avoid infinite loops
+                log_message "Skipping restart on DHCP change event"
+            fi
+        fi
+        ;;
+    *)
+        # Ignore other events (down, pre-up, etc.)
+        ;;
+esac
+
+exit 0

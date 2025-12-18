@@ -232,7 +232,68 @@ fi
 echo "Step 4: Removing systemd service files..."
 rm -f /etc/systemd/system/domain-blocker.service
 rm -f /etc/systemd/system/domain-blocker.timer
+systemctl stop domain-blocker-firewall.service 2>/dev/null || true
+systemctl disable domain-blocker-firewall.service 2>/dev/null || true
+rm -f /etc/systemd/system/domain-blocker-firewall.service
 systemctl daemon-reload
+
+# Remove NetworkManager dispatcher script
+echo "Step 4.5: Removing NetworkManager dispatcher script..."
+if [ -f /etc/NetworkManager/dispatcher.d/99-force-local-dns ]; then
+    chattr -i /etc/NetworkManager/dispatcher.d/99-force-local-dns 2>/dev/null || true
+    rm -f /etc/NetworkManager/dispatcher.d/99-force-local-dns
+    echo "  ✓ Removed dispatcher script"
+fi
+
+# Remove firewall rules
+echo "Step 4.6: Removing firewall rules..."
+# Remove DNS redirection rules
+iptables -t nat -D OUTPUT -p udp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53 2>/dev/null || true
+iptables -t nat -D OUTPUT -p tcp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53 2>/dev/null || true
+ip6tables -t nat -D OUTPUT -p udp --dport 53 ! -d ::1 -j DNAT --to-destination [::1]:53 2>/dev/null || true
+ip6tables -t nat -D OUTPUT -p tcp --dport 53 ! -d ::1 -j DNAT --to-destination [::1]:53 2>/dev/null || true
+
+# Remove DoT blocking
+iptables -D OUTPUT -p tcp --dport 853 -j DROP 2>/dev/null || true
+ip6tables -D OUTPUT -p tcp --dport 853 -j DROP 2>/dev/null || true
+
+# Remove ipset rules and sets
+if command -v ipset &> /dev/null; then
+    iptables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
+    ipset destroy doh-providers 2>/dev/null || true
+    ipset destroy doh-providers-v6 2>/dev/null || true
+fi
+
+# Save the cleaned up iptables rules
+if command -v netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save 2>/dev/null || true
+elif command -v iptables-save >/dev/null 2>&1; then
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+fi
+echo "  ✓ Removed firewall rules"
+
+# Remove browser DNS-over-HTTPS policies
+echo "Step 4.7: Removing browser DoH policies..."
+# Firefox policies
+if [ -f /etc/firefox/policies/policies.json ]; then
+    chattr -i /etc/firefox/policies/policies.json 2>/dev/null || true
+    rm -f /etc/firefox/policies/policies.json
+    echo "  ✓ Removed Firefox DoH policy"
+fi
+
+# Chrome/Chromium policies
+for POLICY_FILE in /etc/opt/chrome/policies/managed/domain-blocker.json /etc/chromium/policies/managed/domain-blocker.json; do
+    if [ -f "$POLICY_FILE" ]; then
+        chattr -i "$POLICY_FILE" 2>/dev/null || true
+        rm -f "$POLICY_FILE"
+    fi
+done
+echo "  ✓ Removed Chrome/Chromium DoH policies"
 
 # Remove sudo restrictions
 echo "Step 5: Removing sudo restrictions..."
