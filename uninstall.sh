@@ -328,10 +328,12 @@ rm -f /etc/sudoers.d/domain-blocker-restrictions
 
 # Remove AppArmor profile
 echo "Step 6: Removing AppArmor profile..."
-rm -f /etc/apparmor.d/local/usr.sbin.dnsmasq
 if command -v apparmor_parser &> /dev/null; then
+    # Unload profile from kernel first (requires the file to exist to read profile name)
     apparmor_parser -R /etc/apparmor.d/local/usr.sbin.dnsmasq 2>/dev/null || true
 fi
+# Now safe to delete the file
+rm -f /etc/apparmor.d/local/usr.sbin.dnsmasq
 
 # Remove log rotation
 echo "Step 7: Removing log rotation..."
