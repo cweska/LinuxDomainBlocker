@@ -232,7 +232,95 @@ fi
 echo "Step 4: Removing systemd service files..."
 rm -f /etc/systemd/system/domain-blocker.service
 rm -f /etc/systemd/system/domain-blocker.timer
+systemctl stop domain-blocker-firewall.service 2>/dev/null || true
+systemctl disable domain-blocker-firewall.service 2>/dev/null || true
+rm -f /etc/systemd/system/domain-blocker-firewall.service
 systemctl daemon-reload
+
+# Remove NetworkManager dispatcher script
+echo "Step 4.5: Removing NetworkManager dispatcher script..."
+if [ -f /etc/NetworkManager/dispatcher.d/99-force-local-dns ]; then
+    chattr -i /etc/NetworkManager/dispatcher.d/99-force-local-dns 2>/dev/null || true
+    rm -f /etc/NetworkManager/dispatcher.d/99-force-local-dns
+    echo "  ✓ Removed dispatcher script"
+fi
+
+# Remove firewall rules
+echo "Step 4.6: Removing firewall rules..."
+# Remove DNS redirection rules
+iptables -t nat -D OUTPUT -p udp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53 2>/dev/null || true
+iptables -t nat -D OUTPUT -p tcp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53 2>/dev/null || true
+ip6tables -t nat -D OUTPUT -p udp --dport 53 ! -d ::1 -j DNAT --to-destination [::1]:53 2>/dev/null || true
+ip6tables -t nat -D OUTPUT -p tcp --dport 53 ! -d ::1 -j DNAT --to-destination [::1]:53 2>/dev/null || true
+
+# Remove DoT blocking
+iptables -D OUTPUT -p tcp --dport 853 -j DROP 2>/dev/null || true
+ip6tables -D OUTPUT -p tcp --dport 853 -j DROP 2>/dev/null || true
+
+# Remove ipset rules and sets (if ipset is available)
+if command -v ipset &> /dev/null; then
+    iptables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers dst -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p tcp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p udp --dport 443 -m set --match-set doh-providers-v6 dst -j DROP 2>/dev/null || true
+    ipset destroy doh-providers 2>/dev/null || true
+    ipset destroy doh-providers-v6 2>/dev/null || true
+fi
+
+# Also remove individual per-IP iptables rules (created when ipset was unavailable during install)
+# These need to be cleaned up regardless of whether ipset is currently available
+DOH_PROVIDERS=(
+    "1.1.1.1" "1.0.0.1" "104.16.248.249" "104.16.249.249"  # Cloudflare
+    "8.8.8.8" "8.8.4.4"                                      # Google
+    "9.9.9.9" "149.112.112.112"                              # Quad9
+    "208.67.222.222" "208.67.220.220"                        # OpenDNS
+    "45.90.28.0" "45.90.30.0"                                # NextDNS
+    "94.140.14.14" "94.140.15.15"                            # AdGuard DNS
+    "185.228.168.168" "185.228.169.168"                      # CleanBrowsing
+)
+DOH_PROVIDERS_V6=(
+    "2606:4700:4700::1111" "2606:4700:4700::1001"  # Cloudflare
+    "2001:4860:4860::8888" "2001:4860:4860::8844"  # Google
+    "2620:fe::fe" "2620:fe::9"                      # Quad9
+)
+
+for ip in "${DOH_PROVIDERS[@]}"; do
+    iptables -D OUTPUT -p tcp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -p udp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+done
+
+for ip in "${DOH_PROVIDERS_V6[@]}"; do
+    ip6tables -D OUTPUT -p tcp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+    ip6tables -D OUTPUT -p udp -d "$ip" --dport 443 -j DROP 2>/dev/null || true
+done
+
+# Save the cleaned up iptables rules
+if command -v netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save 2>/dev/null || true
+elif command -v iptables-save >/dev/null 2>&1; then
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+fi
+echo "  ✓ Removed firewall rules"
+
+# Remove browser DNS-over-HTTPS policies
+echo "Step 4.7: Removing browser DoH policies..."
+# Firefox policies
+if [ -f /etc/firefox/policies/policies.json ]; then
+    chattr -i /etc/firefox/policies/policies.json 2>/dev/null || true
+    rm -f /etc/firefox/policies/policies.json
+    echo "  ✓ Removed Firefox DoH policy"
+fi
+
+# Chrome/Chromium policies
+for POLICY_FILE in /etc/opt/chrome/policies/managed/domain-blocker.json /etc/chromium/policies/managed/domain-blocker.json; do
+    if [ -f "$POLICY_FILE" ]; then
+        chattr -i "$POLICY_FILE" 2>/dev/null || true
+        rm -f "$POLICY_FILE"
+    fi
+done
+echo "  ✓ Removed Chrome/Chromium DoH policies"
 
 # Remove sudo restrictions
 echo "Step 5: Removing sudo restrictions..."
@@ -240,10 +328,12 @@ rm -f /etc/sudoers.d/domain-blocker-restrictions
 
 # Remove AppArmor profile
 echo "Step 6: Removing AppArmor profile..."
-rm -f /etc/apparmor.d/local/usr.sbin.dnsmasq
 if command -v apparmor_parser &> /dev/null; then
+    # Unload profile from kernel first (requires the file to exist to read profile name)
     apparmor_parser -R /etc/apparmor.d/local/usr.sbin.dnsmasq 2>/dev/null || true
 fi
+# Now safe to delete the file
+rm -f /etc/apparmor.d/local/usr.sbin.dnsmasq
 
 # Remove log rotation
 echo "Step 7: Removing log rotation..."

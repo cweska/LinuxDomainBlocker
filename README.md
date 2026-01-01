@@ -15,6 +15,7 @@ This solution uses **dnsmasq** as a local DNS server to block malicious, inappro
 - **Whitelist Support**: Easy whitelisting of required domains (ROS 2, GitHub, etc.)
 - **Security Hardening**: Multiple layers of protection against circumvention
 - **Low Maintenance**: Set it and forget it - updates happen automatically
+- **Take-Home Device Ready**: Blocking persists when devices connect to new networks (home WiFi, mobile hotspots, etc.)
 
 ## Requirements
 
@@ -142,12 +143,25 @@ curl -v http://github.com
 
 ## Security Hardening
 
-The `harden.sh` script applies multiple security measures:
+The `harden.sh` script applies multiple security measures to prevent bypass:
 
 1. **Immutable Files**: Makes critical configuration files immutable using `chattr +i`
 2. **Sudo Restrictions**: Prevents users from modifying DNS and blocking configuration
 3. **AppArmor Profile**: Restricts dnsmasq to only necessary operations
 4. **Monitoring**: Logs potential bypass attempts
+5. **DNS-over-HTTPS Blocking**: Disables DoH in Firefox and Chrome via system policies
+6. **NetworkManager Dispatcher**: Forces DNS settings on ALL new network connections (important for devices that move between networks)
+7. **Firewall Rules**: Redirects all DNS traffic to localhost and blocks DoH/DoT providers
+
+### Bypass Prevention Features
+
+The following measures prevent users from bypassing the blocker:
+
+- **DNS Redirection**: All outgoing DNS traffic (port 53) is redirected to the local dnsmasq server via iptables, regardless of what DNS server applications try to use
+- **DoT Blocking**: DNS-over-TLS (port 853) is blocked at the firewall level
+- **DoH Blocking**: Common DNS-over-HTTPS providers (Cloudflare, Google, Quad9, etc.) are blocked
+- **Browser Policies**: Firefox and Chrome have DoH disabled via system-wide policies
+- **New Network Protection**: When devices connect to new networks (e.g., home WiFi), the dispatcher script automatically enforces DNS settings
 
 To apply hardening:
 ```bash
